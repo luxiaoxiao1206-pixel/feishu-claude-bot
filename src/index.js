@@ -348,33 +348,66 @@ async function createFeishuDoc(title, content) {
     console.log(`📝 开始创建文档: ${title}`);
     console.log(`📄 文档内容预览: ${content.substring(0, 100)}...`);
 
-    // 调用飞书 API 创建文档
-    const response = await feishuClient.docx.document.create({
+    // 步骤1: 调用飞书 API 创建文档
+    const createResponse = await feishuClient.docx.document.create({
       data: {
         folder_token: '', // 空字符串表示创建在根目录
         title: title
       }
     });
 
-    console.log('📊 创建文档API响应:', JSON.stringify(response.data, null, 2));
+    console.log('📊 创建文档API响应:', JSON.stringify(createResponse.data, null, 2));
 
-    if (!response.data?.document?.document_id) {
+    if (!createResponse.data?.document?.document_id) {
       throw new Error('创建文档失败，未返回文档ID');
     }
 
-    const documentId = response.data.document.document_id;
+    const documentId = createResponse.data.document.document_id;
     console.log(`✅ 文档创建成功: ${documentId}`);
 
-    // 尝试添加内容（如果API支持）
-    try {
-      // 需要先获取文档的根block_id
-      // 由于创建响应可能不包含body信息，我们跳过添加内容步骤
-      // 用户可以打开文档后自行编辑
-      console.log('ℹ️  文档已创建为空白文档，用户可打开后编辑');
-    } catch (contentError) {
-      console.warn('添加文档内容失败，但文档已创建:', contentError.message);
-      // 不抛出错误，因为文档已经创建成功
+    // 步骤2: 获取文档详情以获取 block_id
+    console.log('📋 正在获取文档详情...');
+    const docInfoResponse = await feishuClient.docx.document.get({
+      path: { document_id: documentId }
+    });
+
+    console.log('📊 文档详情API响应:', JSON.stringify(docInfoResponse.data, null, 2));
+
+    const blockId = docInfoResponse.data?.document?.body?.block_id;
+
+    if (!blockId) {
+      console.warn('⚠️ 未能获取 block_id，文档已创建但内容需要手动添加');
+      throw new Error('未能获取文档的 block_id');
     }
+
+    console.log(`📍 获取到 block_id: ${blockId}`);
+
+    // 步骤3: 向文档中添加内容
+    console.log('✍️ 正在添加文档内容...');
+
+    // 将内容分段（按换行符分割）
+    const paragraphs = content.split('\n').filter(p => p.trim());
+
+    // 构建文档块
+    const children = paragraphs.map(paragraph => ({
+      block_type: 2, // 2 = 文本块
+      text: {
+        elements: [
+          {
+            text_run: {
+              content: paragraph
+            }
+          }
+        ]
+      }
+    }));
+
+    await feishuClient.docx.documentBlockChildren.create({
+      path: { document_id: documentId, block_id: blockId },
+      data: { children }
+    });
+
+    console.log('✅ 文档内容添加成功');
 
     // 构建文档链接
     const docUrl = `https://feishu.cn/docx/${documentId}`;
@@ -384,11 +417,17 @@ async function createFeishuDoc(title, content) {
       documentId,
       url: docUrl,
       title,
-      content // 返回内容，供后续使用
+      content
     };
   } catch (error) {
     console.error('创建文档失败:', error);
     console.error('错误详情:', error.response?.data || error.message);
+
+    // 如果是添加内容失败，提供更友好的错误信息
+    if (error.message.includes('block_id')) {
+      throw new Error('文档已创建但添加内容失败，请手动编辑文档');
+    }
+
     throw error;
   }
 }
