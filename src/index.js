@@ -492,10 +492,10 @@ async function handleMessage(event) {
     const docInfo = extractDocUrl(userMessage);
     // 检测是否请求群成员信息
     const requestMembers = /群成员|成员列表|有哪些人|谁在群里|查看成员|群里有谁/i.test(userMessage);
-    // 检测是否请求创建文档
-    const requestCreateDoc = /创建文档|新建文档|生成文档|帮我写一个文档|整理成文档/i.test(userMessage);
-    // 检测是否请求创建表格
-    const requestCreateTable = /创建表格|新建表格|生成表格|创建多维表格|新建多维表格/i.test(userMessage);
+    // 检测是否请求创建文档（支持更灵活的模式）
+    const requestCreateDoc = /(创建|新建|生成|写|整理成?).{0,20}(文档|doc)/i.test(userMessage);
+    // 检测是否请求创建表格（支持更灵活的模式）
+    const requestCreateTable = /(创建|新建|生成).{0,20}(表格|多维表格|bitable)/i.test(userMessage);
 
     if (bitableInfo.found) {
       console.log('🔍 检测到多维表格链接');
@@ -586,17 +586,31 @@ async function handleMessage(event) {
           system: `你是一个飞书企业 AI 助手机器人。用户请求创建文档，你需要：
 1. 根据用户的描述生成合适的文档标题
 2. 生成详细的文档内容
-3. 返回格式必须是 JSON: {"title": "文档标题", "content": "文档内容"}
-4. 内容要专业、清晰、结构化`,
+3. 返回格式必须是纯 JSON，格式: {"title": "文档标题", "content": "文档内容"}
+4. 内容要专业、清晰、结构化
+
+重要：只返回JSON对象，不要添加任何其他文字、标签或解释。`,
           messages: [
             {
               role: 'user',
-              content: `用户请求: ${userMessage}\n\n请生成文档的标题和内容，以JSON格式返回。`
+              content: `用户请求: ${userMessage}\n\n请直接返回JSON格式的文档标题和内容，不要添加任何其他内容。`
             }
           ],
         });
 
-        const docData = JSON.parse(claudeResponse.content[0].text);
+        // 提取 JSON（如果 Claude 返回了额外内容，尝试提取）
+        let responseText = claudeResponse.content[0].text.trim();
+
+        // 如果包含 JSON 代码块标记，提取其中的内容
+        if (responseText.includes('```json')) {
+          const match = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+          if (match) responseText = match[1].trim();
+        } else if (responseText.includes('```')) {
+          const match = responseText.match(/```\s*([\s\S]*?)\s*```/);
+          if (match) responseText = match[1].trim();
+        }
+
+        const docData = JSON.parse(responseText);
 
         // 创建文档
         const doc = await createFeishuDoc(docData.title, docData.content);
