@@ -249,11 +249,13 @@ async function fetchDocContent(documentId) {
   try {
     console.log(`📄 开始获取文档内容: documentId=${documentId}`);
 
-    // 获取文档纯文本内容
-    const response = await feishuClient.docx.documentRawContent({
+    // 获取文档纯文本内容 - 正确的API路径
+    const response = await feishuClient.docx.document.rawContent({
       path: { document_id: documentId },
       params: { lang: 0 }
     });
+
+    console.log('📄 文档API响应:', JSON.stringify(response, null, 2));
 
     if (!response.data?.content) {
       throw new Error('无法读取文档内容');
@@ -265,6 +267,7 @@ async function fetchDocContent(documentId) {
     return content;
   } catch (error) {
     console.error('获取文档内容失败:', error);
+    console.error('错误详情:', error.response?.data || error.message);
     throw error;
   }
 }
@@ -313,7 +316,7 @@ async function getChatMembers(chatId) {
     console.log(`👥 开始获取群组成员: chatId=${chatId}`);
 
     // 使用正确的 API 路径
-    const response = await feishuClient.im.chat.members.get({
+    const response = await feishuClient.im.chatMembers.get({
       path: { chat_id: chatId },
       params: {
         member_id_type: 'open_id',
@@ -321,7 +324,7 @@ async function getChatMembers(chatId) {
       }
     });
 
-    console.log('📊 API 响应:', JSON.stringify(response, null, 2));
+    console.log('📊 群成员API响应:', JSON.stringify(response, null, 2));
 
     const members = response.data?.items || [];
     console.log(`👥 获取到 ${members.length} 个群成员`);

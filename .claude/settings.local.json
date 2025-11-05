@@ -3,7 +3,20 @@
     "allow": [
       "Bash(npm install)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(open:*)",
+      "Read(//Users/luckylulu/**)",
+      "Bash(ssh-keygen:*)",
+      "Bash(ssh-add:*)",
+      "Bash(cat:*)",
+      "Bash(ssh:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(curl:*)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []
