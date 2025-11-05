@@ -31,6 +31,38 @@ const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
 });
 
+// 对话历史存储 - 使用 Map 存储每个聊天的历史记录
+// key: chatId, value: 对话历史数组
+const conversationHistory = new Map();
+
+// 获取对话历史
+function getConversationHistory(chatId) {
+  if (!conversationHistory.has(chatId)) {
+    conversationHistory.set(chatId, []);
+  }
+  return conversationHistory.get(chatId);
+}
+
+// 添加消息到历史
+function addToConversationHistory(chatId, role, content) {
+  const history = getConversationHistory(chatId);
+  history.push({ role, content });
+
+  // 保留最近10轮对话（20条消息），避免超过 token 限制
+  const MAX_MESSAGES = 20;
+  if (history.length > MAX_MESSAGES) {
+    history.splice(0, history.length - MAX_MESSAGES);
+  }
+
+  console.log(`💬 [${chatId}] 对话历史长度: ${history.length} 条消息`);
+}
+
+// 清除对话历史（可选功能）
+function clearConversationHistory(chatId) {
+  conversationHistory.delete(chatId);
+  console.log(`🗑️ [${chatId}] 对话历史已清除`);
+}
+
 // 健康检查接口
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -603,15 +635,34 @@ async function handleMessage(event) {
         reply = `抱歉，创建表格时出现错误: ${error.message}\n\n请确保机器人有权限创建多维表格。`;
       }
     } else {
-      // 普通对话
-      const claudeResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 4096,
-        system: `你是一个飞书企业 AI 助手机器人，由 Claude AI 提供支持。
+      // 检测是否请求清除对话历史
+      const requestClearHistory = /清除对话|重置对话|清空历史|新对话/i.test(userMessage);
+
+      if (requestClearHistory) {
+        clearConversationHistory(chatId);
+        reply = '✅ 对话历史已清除，我们可以开始新的对话了！';
+      } else {
+        // 普通对话 - 使用对话历史
+        const history = getConversationHistory(chatId);
+
+        // 构建消息数组：历史 + 当前消息
+        const messages = [
+          ...history,
+          {
+            role: 'user',
+            content: userMessage
+          }
+        ];
+
+        const claudeResponse = await anthropic.messages.create({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 4096,
+          system: `你是一个飞书企业 AI 助手机器人，由 Claude AI 提供支持。
 
 你的身份和功能：
 - 你运行在飞书平台上，用户通过飞书与你对话
 - 你可以帮助用户回答问题、进行对话交流
+- 你可以记住之前的对话内容，支持多轮对话
 
 📊 数据分析能力：
 - ✅ 分析飞书多维表格数据（用户发送表格链接）
@@ -622,20 +673,23 @@ async function handleMessage(event) {
 - ✅ 创建飞书文档（用户说"创建文档"或"生成文档"）
 - ✅ 创建多维表格（用户说"创建表格"或"新建表格"）
 
+💡 其他功能：
+- 清除对话历史（用户说"清除对话"或"重置对话"）
+
 回答风格：
 - 以飞书机器人的身份回答，不要说"我不在飞书中运行"
 - 简洁、专业、友好
 - 如果用户问到你的功能，直接介绍你能做什么
 - 使用中文回答`,
-        messages: [
-          {
-            role: 'user',
-            content: userMessage
-          }
-        ],
-      });
+          messages: messages,
+        });
 
-      reply = claudeResponse.content[0].text;
+        reply = claudeResponse.content[0].text;
+
+        // 将对话添加到历史记录
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+      }
     }
 
     console.log('回复内容:', reply);
