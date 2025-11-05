@@ -312,7 +312,8 @@ async function getChatMembers(chatId) {
   try {
     console.log(`👥 开始获取群组成员: chatId=${chatId}`);
 
-    const response = await feishuClient.im.chatMembers.get({
+    // 使用正确的 API 路径
+    const response = await feishuClient.im.chat.members.get({
       path: { chat_id: chatId },
       params: {
         member_id_type: 'open_id',
@@ -320,12 +321,20 @@ async function getChatMembers(chatId) {
       }
     });
 
+    console.log('📊 API 响应:', JSON.stringify(response, null, 2));
+
     const members = response.data?.items || [];
     console.log(`👥 获取到 ${members.length} 个群成员`);
+
+    // 打印成员详细信息
+    members.forEach((m, i) => {
+      console.log(`成员 ${i + 1}:`, JSON.stringify(m, null, 2));
+    });
 
     return members;
   } catch (error) {
     console.error('获取群组成员失败:', error);
+    console.error('错误详情:', error.response?.data || error.message);
     throw error;
   }
 }
@@ -409,7 +418,11 @@ async function handleMessage(event) {
         const members = await getChatMembers(chatId);
 
         // 格式化成员列表
-        const memberList = members.map((m, index) => `${index + 1}. ${m.name || 'Unknown'}`).join('\n');
+        const memberList = members.map((m, index) => {
+          // 尝试多个可能的名称字段
+          const displayName = m.name || m.member_name || m.user_name || `用户 ${m.member_id?.slice(0, 8)}`;
+          return `${index + 1}. ${displayName}`;
+        }).join('\n');
 
         reply = `👥 当前群组成员列表（共 ${members.length} 人）：\n\n${memberList}`;
 
