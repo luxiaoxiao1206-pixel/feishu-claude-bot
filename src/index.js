@@ -310,6 +310,102 @@ async function analyzeDocContent(docContent, userQuestion) {
   }
 }
 
+// 创建飞书文档
+async function createFeishuDoc(title, content) {
+  try {
+    console.log(`📝 开始创建文档: ${title}`);
+
+    // 将内容转换为 markdown 格式
+    const markdown = `# ${title}\n\n${content}`;
+
+    // 调用飞书 API 创建文档
+    const response = await feishuClient.docx.document.create({
+      data: {
+        folder_token: '', // 空字符串表示创建在根目录
+        title: title
+      }
+    });
+
+    if (!response.data?.document?.document_id) {
+      throw new Error('创建文档失败，未返回文档ID');
+    }
+
+    const documentId = response.data.document.document_id;
+    console.log(`✅ 文档创建成功: ${documentId}`);
+
+    // 向文档中添加内容（使用批量更新API）
+    await feishuClient.docx.documentBlockChildren.create({
+      path: { document_id: documentId, block_id: response.data.document.body.block_id },
+      data: {
+        children: [
+          {
+            block_type: 1, // 文本块
+            text: {
+              elements: [
+                {
+                  text_run: {
+                    content: content
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+
+    // 构建文档链接
+    const docUrl = `https://feishu.cn/docx/${documentId}`;
+    console.log(`📄 文档链接: ${docUrl}`);
+
+    return {
+      documentId,
+      url: docUrl,
+      title
+    };
+  } catch (error) {
+    console.error('创建文档失败:', error);
+    console.error('错误详情:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// 创建多维表格
+async function createBitableApp(name, description = '') {
+  try {
+    console.log(`📊 开始创建多维表格: ${name}`);
+
+    // 创建 Base App
+    const response = await feishuClient.bitable.app.create({
+      data: {
+        name: name,
+        folder_token: '' // 空字符串表示创建在根目录
+      }
+    });
+
+    if (!response.data?.app?.app_token) {
+      throw new Error('创建多维表格失败，未返回app_token');
+    }
+
+    const appToken = response.data.app.app_token;
+    console.log(`✅ 多维表格创建成功: ${appToken}`);
+
+    // 构建表格链接
+    const bitableUrl = `https://feishu.cn/base/${appToken}`;
+    console.log(`📊 表格链接: ${bitableUrl}`);
+
+    return {
+      appToken,
+      url: bitableUrl,
+      name
+    };
+  } catch (error) {
+    console.error('创建多维表格失败:', error);
+    console.error('错误详情:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
 // 获取群组成员列表
 async function getChatMembers(chatId) {
   try {
@@ -364,6 +460,10 @@ async function handleMessage(event) {
     const docInfo = extractDocUrl(userMessage);
     // 检测是否请求群成员信息
     const requestMembers = /群成员|成员列表|有哪些人|谁在群里|查看成员|群里有谁/i.test(userMessage);
+    // 检测是否请求创建文档
+    const requestCreateDoc = /创建文档|新建文档|生成文档|帮我写一个文档|整理成文档/i.test(userMessage);
+    // 检测是否请求创建表格
+    const requestCreateTable = /创建表格|新建表格|生成表格|创建多维表格|新建多维表格/i.test(userMessage);
 
     if (bitableInfo.found) {
       console.log('🔍 检测到多维表格链接');
@@ -433,6 +533,75 @@ async function handleMessage(event) {
         console.error('获取群成员失败:', error);
         reply = `抱歉，获取群成员信息时出现错误: ${error.message}\n\n请确保机器人有权限查看群成员列表。`;
       }
+    } else if (requestCreateDoc) {
+      console.log('🔍 检测到创建文档请求');
+
+      try {
+        // 发送"正在创建"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: '📝 正在创建文档，请稍候...' }),
+          },
+        });
+
+        // 使用 Claude 生成文档标题和内容
+        const claudeResponse = await anthropic.messages.create({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 4096,
+          system: `你是一个飞书企业 AI 助手机器人。用户请求创建文档，你需要：
+1. 根据用户的描述生成合适的文档标题
+2. 生成详细的文档内容
+3. 返回格式必须是 JSON: {"title": "文档标题", "content": "文档内容"}
+4. 内容要专业、清晰、结构化`,
+          messages: [
+            {
+              role: 'user',
+              content: `用户请求: ${userMessage}\n\n请生成文档的标题和内容，以JSON格式返回。`
+            }
+          ],
+        });
+
+        const docData = JSON.parse(claudeResponse.content[0].text);
+
+        // 创建文档
+        const doc = await createFeishuDoc(docData.title, docData.content);
+
+        reply = `✅ 文档创建成功！\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}`;
+
+      } catch (error) {
+        console.error('创建文档失败:', error);
+        reply = `抱歉，创建文档时出现错误: ${error.message}\n\n请确保机器人有权限创建文档。`;
+      }
+    } else if (requestCreateTable) {
+      console.log('🔍 检测到创建表格请求');
+
+      try {
+        // 发送"正在创建"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: '📊 正在创建多维表格，请稍候...' }),
+          },
+        });
+
+        // 提取表格名称（如果用户指定了）
+        const tableNameMatch = userMessage.match(/创建.*?["'《](.+?)["'》]|创建(.+?)表格/);
+        const tableName = tableNameMatch ? (tableNameMatch[1] || tableNameMatch[2]) : '新建表格';
+
+        // 创建多维表格
+        const bitable = await createBitableApp(tableName);
+
+        reply = `✅ 多维表格创建成功！\n\n📊 表格名称: ${bitable.name}\n🔗 表格链接: ${bitable.url}\n\n💡 提示：你可以在表格中添加数据，然后发送链接给我分析。`;
+
+      } catch (error) {
+        console.error('创建表格失败:', error);
+        reply = `抱歉，创建表格时出现错误: ${error.message}\n\n请确保机器人有权限创建多维表格。`;
+      }
     } else {
       // 普通对话
       const claudeResponse = await anthropic.messages.create({
@@ -443,10 +612,15 @@ async function handleMessage(event) {
 你的身份和功能：
 - 你运行在飞书平台上，用户通过飞书与你对话
 - 你可以帮助用户回答问题、进行对话交流
-- ✅ 你可以分析飞书多维表格数据（用户发送表格链接）
-- ✅ 你可以读取和分析飞书文档（用户发送文档链接）
-- ✅ 你可以查看群组成员列表（用户询问"群成员"或"有哪些人"）
-- 你即将支持创建飞书文档来整理信息
+
+📊 数据分析能力：
+- ✅ 分析飞书多维表格数据（用户发送表格链接）
+- ✅ 读取和分析飞书文档（用户发送文档链接）
+- ✅ 查看群组成员列表（用户询问"群成员"或"有哪些人"）
+
+📝 创建能力：
+- ✅ 创建飞书文档（用户说"创建文档"或"生成文档"）
+- ✅ 创建多维表格（用户说"创建表格"或"新建表格"）
 
 回答风格：
 - 以飞书机器人的身份回答，不要说"我不在飞书中运行"
