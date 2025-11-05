@@ -31,11 +31,15 @@ app.get('/health', (req, res) => {
 app.post('/webhook/event', async (req, res) => {
   try {
     const body = req.body;
+    console.log('收到请求，body:', JSON.stringify(body, null, 2));
 
     // URL验证
     if (body.type === 'url_verification') {
-      console.log('收到URL验证请求');
-      return res.json({ challenge: body.challenge });
+      console.log('这是URL验证请求');
+      console.log('challenge值:', body.challenge);
+      const response = { challenge: body.challenge };
+      console.log('准备返回:', JSON.stringify(response));
+      return res.json(response);
     }
 
     // 处理事件回调
