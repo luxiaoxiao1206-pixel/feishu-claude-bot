@@ -367,20 +367,26 @@ async function createFeishuDoc(title, content) {
 
     // 步骤2: 获取文档详情以获取 block_id
     console.log('📋 正在获取文档详情...');
-    const docInfoResponse = await feishuClient.docx.document.get({
-      path: { document_id: documentId }
-    });
 
-    console.log('📊 文档详情API响应:', JSON.stringify(docInfoResponse.data, null, 2));
-
-    const blockId = docInfoResponse.data?.document?.body?.block_id;
-
-    if (!blockId) {
-      console.warn('⚠️ 未能获取 block_id，文档已创建但内容需要手动添加');
-      throw new Error('未能获取文档的 block_id');
+    // 方法1: 尝试通过 document.get 获取
+    let blockId = null;
+    try {
+      const docInfoResponse = await feishuClient.docx.document.get({
+        path: { document_id: documentId }
+      });
+      console.log('📊 文档详情API响应:', JSON.stringify(docInfoResponse.data, null, 2));
+      blockId = docInfoResponse.data?.document?.body?.block_id;
+    } catch (e) {
+      console.warn('⚠️ 通过 document.get 获取 block_id 失败:', e.message);
     }
 
-    console.log(`📍 获取到 block_id: ${blockId}`);
+    // 方法2: 如果方法1失败，使用 document_id 作为 block_id（根block）
+    if (!blockId) {
+      console.log('📍 尝试使用 document_id 作为根 block_id');
+      blockId = documentId;
+    }
+
+    console.log(`📍 使用 block_id: ${blockId}`);
 
     // 步骤3: 向文档中添加内容
     console.log('✍️ 正在添加文档内容...');
