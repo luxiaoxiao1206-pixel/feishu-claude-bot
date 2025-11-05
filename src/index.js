@@ -547,9 +547,16 @@ async function handleMessage(event) {
         // 分析表格数据
         reply = await analyzeBitableData(bitableData, userMessage);
 
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+
       } catch (error) {
         console.error('多维表格分析失败:', error);
         reply = `抱歉，分析多维表格时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限访问该表格\n2. 表格链接正确\n3. 表格包含数据`;
+        // 即使出错也记录到历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (docInfo.found) {
       console.log('🔍 检测到文档链接');
@@ -571,9 +578,16 @@ async function handleMessage(event) {
         // 分析文档内容
         reply = await analyzeDocContent(docContent, userMessage);
 
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+
       } catch (error) {
         console.error('文档分析失败:', error);
         reply = `抱歉，读取文档时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限访问该文档\n2. 文档链接正确\n3. 文档类型支持（docx/doc/docs）`;
+        // 即使出错也记录到历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestMembers) {
       console.log('🔍 检测到群成员查询请求');
@@ -591,9 +605,16 @@ async function handleMessage(event) {
 
         reply = `👥 当前群组成员列表（共 ${members.length} 人）：\n\n${memberList}`;
 
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+
       } catch (error) {
         console.error('获取群成员失败:', error);
         reply = `抱歉，获取群成员信息时出现错误: ${error.message}\n\n请确保机器人有权限查看群成员列表。`;
+        // 即使出错也记录到历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestCreateDoc) {
       console.log('🔍 检测到创建文档请求');
@@ -650,11 +671,18 @@ async function handleMessage(event) {
           ? doc.content.substring(0, 200) + '...'
           : doc.content;
 
-        reply = `✅ 文档创建成功！\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}\n\n📝 内容摘要:\n${contentPreview}\n\n💡 提示：文档已创建为空白文档，请点击链接打开后，将以上内容复制进去。`;
+        reply = `✅ 文档创建成功！\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}\n\n📝 内容摘要:\n${contentPreview}\n\n💡 提示：文档已自动填充内容。`;
+
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
 
       } catch (error) {
         console.error('创建文档失败:', error);
         reply = `抱歉，创建文档时出现错误: ${error.message}\n\n请确保机器人有权限创建文档。`;
+        // 即使出错也记录到历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestCreateTable) {
       console.log('🔍 检测到创建表格请求');
@@ -679,9 +707,16 @@ async function handleMessage(event) {
 
         reply = `✅ 多维表格创建成功！\n\n📊 表格名称: ${bitable.name}\n🔗 表格链接: ${bitable.url}\n\n💡 提示：你可以在表格中添加数据，然后发送链接给我分析。`;
 
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+
       } catch (error) {
         console.error('创建表格失败:', error);
         reply = `抱歉，创建表格时出现错误: ${error.message}\n\n请确保机器人有权限创建多维表格。`;
+        // 即使出错也记录到历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
       }
     } else {
       // 检测是否请求清除对话历史
