@@ -98,6 +98,127 @@ app.post('/webhook/event', async (req, res) => {
   }
 });
 
+// 解析飞书多维表格 URL
+function extractBitableUrl(text) {
+  // 匹配飞书多维表格链接
+  const bitableRegex = /https?:\/\/[^/]+\/base\/([a-zA-Z0-9]+)(?:\?table=([a-zA-Z0-9]+))?/;
+  const match = text.match(bitableRegex);
+
+  if (match) {
+    return {
+      found: true,
+      appToken: match[1],
+      tableId: match[2] || null,
+      fullUrl: match[0]
+    };
+  }
+
+  return { found: false };
+}
+
+// 获取多维表格数据
+async function fetchBitableData(appToken, tableId = null) {
+  try {
+    console.log(`📊 开始获取多维表格数据: appToken=${appToken}, tableId=${tableId}`);
+
+    // 如果没有指定 tableId，获取第一个表格
+    if (!tableId) {
+      const tablesResponse = await feishuClient.bitable.appTable.list({
+        path: { app_token: appToken },
+        params: { page_size: 1 }
+      });
+
+      if (!tablesResponse.data?.items || tablesResponse.data.items.length === 0) {
+        throw new Error('多维表格中没有找到表格');
+      }
+
+      tableId = tablesResponse.data.items[0].table_id;
+      console.log(`📋 使用第一个表格: ${tableId}`);
+    }
+
+    // 获取字段信息
+    const fieldsResponse = await feishuClient.bitable.appTableField.list({
+      path: { app_token: appToken, table_id: tableId },
+      params: { page_size: 100 }
+    });
+
+    const fields = fieldsResponse.data?.items || [];
+    console.log(`📝 获取到 ${fields.length} 个字段`);
+
+    // 获取记录数据（最多100条）
+    const recordsResponse = await feishuClient.bitable.appTableRecord.list({
+      path: { app_token: appToken, table_id: tableId },
+      params: { page_size: 100 }
+    });
+
+    const records = recordsResponse.data?.items || [];
+    console.log(`📊 获取到 ${records.length} 条记录`);
+
+    return {
+      fields,
+      records,
+      tableId
+    };
+  } catch (error) {
+    console.error('获取多维表格数据失败:', error);
+    throw error;
+  }
+}
+
+// 分析多维表格数据
+async function analyzeBitableData(bitableData, userQuestion) {
+  try {
+    // 构建表格数据的文本描述
+    const fieldNames = bitableData.fields.map(f => f.field_name).join(', ');
+    const recordCount = bitableData.records.length;
+
+    // 提取前10条记录作为示例
+    const sampleRecords = bitableData.records.slice(0, 10).map(record => {
+      const row = {};
+      bitableData.fields.forEach(field => {
+        const value = record.fields[field.field_id];
+        row[field.field_name] = value;
+      });
+      return row;
+    });
+
+    const tableDescription = `
+多维表格数据概览：
+- 字段: ${fieldNames}
+- 总记录数: ${recordCount}
+- 示例数据（前10条）:
+${JSON.stringify(sampleRecords, null, 2)}
+`;
+
+    console.log('📊 发送表格数据给 Claude 分析');
+
+    // 调用 Claude 分析
+    const claudeResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 4096,
+      system: `你是一个飞书企业 AI 助手机器人，擅长分析多维表格数据。
+
+分析要求：
+- 理解表格的结构和内容
+- 根据用户的问题提供准确的分析
+- 如果用户没有具体问题，提供数据的概览和关键洞察
+- 使用清晰的格式，包含具体数字和示例
+- 使用中文回答`,
+      messages: [
+        {
+          role: 'user',
+          content: `${tableDescription}\n\n用户问题: ${userQuestion || '请分析这个表格的数据'}`
+        }
+      ],
+    });
+
+    return claudeResponse.content[0].text;
+  } catch (error) {
+    console.error('分析多维表格数据失败:', error);
+    throw error;
+  }
+}
+
 // 处理消息
 async function handleMessage(event) {
   try {
@@ -112,16 +233,46 @@ async function handleMessage(event) {
 
     console.log(`收到消息 [${chatId}]: ${userMessage}`);
 
-    // 调用Claude API
-    const claudeResponse = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 4096,
-      system: `你是一个飞书企业 AI 助手机器人，由 Claude AI 提供支持。
+    let reply;
+
+    // 检测是否包含多维表格链接
+    const bitableInfo = extractBitableUrl(userMessage);
+
+    if (bitableInfo.found) {
+      console.log('🔍 检测到多维表格链接');
+
+      try {
+        // 发送"正在分析"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: '📊 正在读取和分析表格数据，请稍候...' }),
+          },
+        });
+
+        // 获取表格数据
+        const bitableData = await fetchBitableData(bitableInfo.appToken, bitableInfo.tableId);
+
+        // 分析表格数据
+        reply = await analyzeBitableData(bitableData, userMessage);
+
+      } catch (error) {
+        console.error('多维表格分析失败:', error);
+        reply = `抱歉，分析多维表格时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限访问该表格\n2. 表格链接正确\n3. 表格包含数据`;
+      }
+    } else {
+      // 普通对话
+      const claudeResponse = await anthropic.messages.create({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 4096,
+        system: `你是一个飞书企业 AI 助手机器人，由 Claude AI 提供支持。
 
 你的身份和功能：
 - 你运行在飞书平台上，用户通过飞书与你对话
 - 你可以帮助用户回答问题、进行对话交流
-- 你即将支持分析飞书多维表格数据
+- 你可以分析飞书多维表格数据（用户发送表格链接即可）
 - 你即将支持创建飞书文档来整理信息
 
 回答风格：
@@ -129,16 +280,18 @@ async function handleMessage(event) {
 - 简洁、专业、友好
 - 如果用户问到你的功能，直接介绍你能做什么
 - 使用中文回答`,
-      messages: [
-        {
-          role: 'user',
-          content: userMessage
-        }
-      ],
-    });
+        messages: [
+          {
+            role: 'user',
+            content: userMessage
+          }
+        ],
+      });
 
-    const reply = claudeResponse.content[0].text;
-    console.log('Claude回复:', reply);
+      reply = claudeResponse.content[0].text;
+    }
+
+    console.log('回复内容:', reply);
 
     // 发送回复到飞书
     await feishuClient.im.message.create({
