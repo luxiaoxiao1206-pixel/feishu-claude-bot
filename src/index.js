@@ -219,6 +219,117 @@ ${JSON.stringify(sampleRecords, null, 2)}
   }
 }
 
+// 解析飞书文档 URL
+function extractDocUrl(text) {
+  // 匹配飞书文档链接 (docx, doc, docs)
+  const docxRegex = /https?:\/\/[^/]+\/docx\/([a-zA-Z0-9]+)/;
+  const docRegex = /https?:\/\/[^/]+\/doc\/([a-zA-Z0-9]+)/;
+  const docsRegex = /https?:\/\/[^/]+\/docs\/([a-zA-Z0-9]+)/;
+
+  let match = text.match(docxRegex);
+  if (match) {
+    return { found: true, documentId: match[1], type: 'docx', fullUrl: match[0] };
+  }
+
+  match = text.match(docRegex);
+  if (match) {
+    return { found: true, documentId: match[1], type: 'doc', fullUrl: match[0] };
+  }
+
+  match = text.match(docsRegex);
+  if (match) {
+    return { found: true, documentId: match[1], type: 'docs', fullUrl: match[0] };
+  }
+
+  return { found: false };
+}
+
+// 获取飞书文档内容
+async function fetchDocContent(documentId) {
+  try {
+    console.log(`📄 开始获取文档内容: documentId=${documentId}`);
+
+    // 获取文档纯文本内容
+    const response = await feishuClient.docx.documentRawContent({
+      path: { document_id: documentId },
+      params: { lang: 0 }
+    });
+
+    if (!response.data?.content) {
+      throw new Error('无法读取文档内容');
+    }
+
+    const content = response.data.content;
+    console.log(`📝 获取到文档内容，长度: ${content.length} 字符`);
+
+    return content;
+  } catch (error) {
+    console.error('获取文档内容失败:', error);
+    throw error;
+  }
+}
+
+// 分析文档内容
+async function analyzeDocContent(docContent, userQuestion) {
+  try {
+    console.log('📄 发送文档内容给 Claude 分析');
+
+    // 限制文档内容长度（避免超过 token 限制）
+    const maxLength = 50000; // 约 12500 tokens
+    const truncatedContent = docContent.length > maxLength
+      ? docContent.substring(0, maxLength) + '\n\n...(内容过长，已截断)'
+      : docContent;
+
+    // 调用 Claude 分析
+    const claudeResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 4096,
+      system: `你是一个飞书企业 AI 助手机器人，擅长分析和总结文档内容。
+
+分析要求：
+- 理解文档的主要内容和结构
+- 根据用户的问题提供准确的分析或总结
+- 如果用户没有具体问题，提供文档的概要和关键要点
+- 使用清晰的格式，突出重点信息
+- 使用中文回答`,
+      messages: [
+        {
+          role: 'user',
+          content: `文档内容：\n\n${truncatedContent}\n\n用户问题: ${userQuestion || '请总结这个文档的主要内容'}`
+        }
+      ],
+    });
+
+    return claudeResponse.content[0].text;
+  } catch (error) {
+    console.error('分析文档内容失败:', error);
+    throw error;
+  }
+}
+
+// 获取群组成员列表
+async function getChatMembers(chatId) {
+  try {
+    console.log(`👥 开始获取群组成员: chatId=${chatId}`);
+
+    const response = await feishuClient.im.chatMembers.get({
+      path: { chat_id: chatId },
+      params: {
+        member_id_type: 'open_id',
+        page_size: 100
+      }
+    });
+
+    const members = response.data?.items || [];
+    console.log(`👥 获取到 ${members.length} 个群成员`);
+
+    return members;
+  } catch (error) {
+    console.error('获取群组成员失败:', error);
+    throw error;
+  }
+}
+
 // 处理消息
 async function handleMessage(event) {
   try {
@@ -237,6 +348,10 @@ async function handleMessage(event) {
 
     // 检测是否包含多维表格链接
     const bitableInfo = extractBitableUrl(userMessage);
+    // 检测是否包含文档链接
+    const docInfo = extractDocUrl(userMessage);
+    // 检测是否请求群成员信息
+    const requestMembers = /群成员|成员列表|有哪些人|谁在群里|查看成员|群里有谁/i.test(userMessage);
 
     if (bitableInfo.found) {
       console.log('🔍 检测到多维表格链接');
@@ -262,6 +377,46 @@ async function handleMessage(event) {
         console.error('多维表格分析失败:', error);
         reply = `抱歉，分析多维表格时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限访问该表格\n2. 表格链接正确\n3. 表格包含数据`;
       }
+    } else if (docInfo.found) {
+      console.log('🔍 检测到文档链接');
+
+      try {
+        // 发送"正在读取"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: '📄 正在读取和分析文档内容，请稍候...' }),
+          },
+        });
+
+        // 获取文档内容
+        const docContent = await fetchDocContent(docInfo.documentId);
+
+        // 分析文档内容
+        reply = await analyzeDocContent(docContent, userMessage);
+
+      } catch (error) {
+        console.error('文档分析失败:', error);
+        reply = `抱歉，读取文档时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限访问该文档\n2. 文档链接正确\n3. 文档类型支持（docx/doc/docs）`;
+      }
+    } else if (requestMembers) {
+      console.log('🔍 检测到群成员查询请求');
+
+      try {
+        // 获取群组成员
+        const members = await getChatMembers(chatId);
+
+        // 格式化成员列表
+        const memberList = members.map((m, index) => `${index + 1}. ${m.name || 'Unknown'}`).join('\n');
+
+        reply = `👥 当前群组成员列表（共 ${members.length} 人）：\n\n${memberList}`;
+
+      } catch (error) {
+        console.error('获取群成员失败:', error);
+        reply = `抱歉，获取群成员信息时出现错误: ${error.message}\n\n请确保机器人有权限查看群成员列表。`;
+      }
     } else {
       // 普通对话
       const claudeResponse = await anthropic.messages.create({
@@ -272,7 +427,9 @@ async function handleMessage(event) {
 你的身份和功能：
 - 你运行在飞书平台上，用户通过飞书与你对话
 - 你可以帮助用户回答问题、进行对话交流
-- 你可以分析飞书多维表格数据（用户发送表格链接即可）
+- ✅ 你可以分析飞书多维表格数据（用户发送表格链接）
+- ✅ 你可以读取和分析飞书文档（用户发送文档链接）
+- ✅ 你可以查看群组成员列表（用户询问"群成员"或"有哪些人"）
 - 你即将支持创建飞书文档来整理信息
 
 回答风格：
