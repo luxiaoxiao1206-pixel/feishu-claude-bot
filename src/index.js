@@ -17,6 +17,15 @@ const feishuClient = new lark.Client({
   domain: lark.Domain.Feishu,
 });
 
+// 初始化加密工具（如果配置了 Encrypt Key）
+let cipher = null;
+if (process.env.FEISHU_ENCRYPT_KEY) {
+  cipher = new lark.AESCipher(process.env.FEISHU_ENCRYPT_KEY);
+  console.log('✅ 加密模式已启用');
+} else {
+  console.log('ℹ️  未配置加密密钥，使用明文模式');
+}
+
 // 初始化Claude客户端
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
@@ -30,12 +39,40 @@ app.get('/health', (req, res) => {
 // 飞书事件回调接口
 app.post('/webhook/event', async (req, res) => {
   try {
-    const body = req.body;
-    console.log('收到请求，body:', JSON.stringify(body, null, 2));
+    let body = req.body;
+    console.log('收到原始请求，body:', JSON.stringify(body, null, 2));
+
+    // 处理加密消息
+    if (body.encrypt) {
+      console.log('🔐 检测到加密消息，开始解密...');
+      if (!cipher) {
+        console.error('❌ 收到加密消息但未配置 FEISHU_ENCRYPT_KEY');
+        return res.status(400).json({
+          code: -1,
+          msg: '服务器未配置加密密钥'
+        });
+      }
+
+      try {
+        // 解密消息
+        const decryptedString = cipher.decrypt(body.encrypt);
+        console.log('✅ 解密成功，解密后的字符串:', decryptedString);
+
+        // 解析 JSON
+        body = JSON.parse(decryptedString);
+        console.log('📦 解析后的消息体:', JSON.stringify(body, null, 2));
+      } catch (decryptError) {
+        console.error('❌ 解密失败:', decryptError);
+        return res.status(400).json({
+          code: -1,
+          msg: '消息解密失败'
+        });
+      }
+    }
 
     // URL验证
     if (body.type === 'url_verification') {
-      console.log('这是URL验证请求');
+      console.log('✅ URL验证请求');
       console.log('challenge值:', body.challenge);
       const response = { challenge: body.challenge };
       console.log('准备返回:', JSON.stringify(response));
