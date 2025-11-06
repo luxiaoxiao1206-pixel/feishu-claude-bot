@@ -622,27 +622,41 @@ async function createBitableApp(name, userRequest = '') {
 {
   "tableName": "表格名称",
   "fields": [
-    {"name": "字段1", "type": 1},
-    {"name": "字段2", "type": 2},
-    {"name": "字段3", "type": 3}
+    {"field_name": "字段1", "type": 1, "ui_type": "Text"},
+    {"field_name": "字段2", "type": 2, "ui_type": "Number"},
+    {
+      "field_name": "字段3",
+      "type": 3,
+      "ui_type": "SingleSelect",
+      "property": {
+        "options": [
+          {"name": "选项A"},
+          {"name": "选项B"},
+          {"name": "选项C"}
+        ]
+      }
+    }
   ],
   "records": [
-    {"字段1": "值1", "字段2": 123, "字段3": "值3"},
-    {"字段1": "值2", "字段2": 456, "字段3": "值4"}
+    {"字段1": "值1", "字段2": 123, "字段3": "选项A"},
+    {"字段1": "值2", "字段2": 456, "字段3": "选项B"}
   ]
 }
 
-字段类型说明：
-1 = 多行文本
-2 = 数字
-3 = 单选
-5 = 日期
+字段类型说明（type 和 ui_type 必须对应）：
+- type: 1, ui_type: "Text" (多行文本) - 无需property
+- type: 2, ui_type: "Number" (数字) - 无需property
+- type: 3, ui_type: "SingleSelect" (单选) - 需要property.options数组
+- type: 5, ui_type: "DateTime" (日期) - 无需property
 
 规则：
-1. 第一个字段必须是多行文本类型（作为主字段）
+1. 第一个字段必须是多行文本类型（type: 1, ui_type: "Text"）作为主字段
 2. 至少设计3个字段，最多8个字段
 3. 生成3-5条示例数据
-4. 只返回JSON，不要其他内容`,
+4. 字段必须包含 field_name、type、ui_type 属性
+5. 单选字段(SingleSelect)必须包含 property.options 数组，每个选项只需 name 属性
+6. records中的key使用字段的中文名称（不带field_name前缀）
+7. 只返回JSON，不要其他内容`,
       messages: [{
         role: 'user',
         content: `用户需求：${userRequest || name}\n\n请设计表格结构并生成示例数据（只返回JSON）：`
