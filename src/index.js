@@ -35,6 +35,10 @@ const anthropic = new Anthropic({
 // key: chatId, value: 对话历史数组
 const conversationHistory = new Map();
 
+// 文档缓存存储 - 记录会话中讨论过的文档
+// key: chatId, value: [{docId, title, summary, time}]
+const documentCache = new Map();
+
 // 获取对话历史
 function getConversationHistory(chatId) {
   if (!conversationHistory.has(chatId)) {
@@ -61,6 +65,169 @@ function addToConversationHistory(chatId, role, content) {
 function clearConversationHistory(chatId) {
   conversationHistory.delete(chatId);
   console.log(`🗑️ [${chatId}] 对话历史已清除`);
+}
+
+// ==================== 文档缓存管理 ====================
+
+// 添加文档到缓存
+function addDocumentToCache(chatId, docId, title, summary) {
+  if (!documentCache.has(chatId)) {
+    documentCache.set(chatId, []);
+  }
+  const docs = documentCache.get(chatId);
+
+  // 检查是否已存在
+  const existingIndex = docs.findIndex(d => d.docId === docId);
+  if (existingIndex !== -1) {
+    // 更新现有文档
+    docs[existingIndex] = { docId, title, summary, time: new Date().toISOString() };
+  } else {
+    // 添加新文档到开头
+    docs.unshift({ docId, title, summary, time: new Date().toISOString() });
+  }
+
+  // 只保留最近10个文档
+  if (docs.length > 10) {
+    docs.pop();
+  }
+
+  console.log(`📄 [${chatId}] 文档已缓存: ${title}`);
+}
+
+// 获取最近的文档
+function getRecentDocuments(chatId) {
+  return documentCache.get(chatId) || [];
+}
+
+// ==================== 工作报告生成 ====================
+
+// 生成工作报告（日报/周报）
+async function generateWorkReport(chatId, reportType) {
+  const history = getConversationHistory(chatId);
+
+  if (history.length === 0) {
+    return '📝 暂无对话历史，无法生成报告。\n\n💡 提示：请先与我进行一些工作相关的对话，我会基于对话内容为您生成报告。';
+  }
+
+  console.log(`📊 开始生成${reportType === 'daily' ? '日报' : '周报'}，历史记录数: ${history.length}`);
+
+  // 构建提示词
+  const systemPrompt = `你是一个专业的工作报告生成助手。基于用户的对话历史，生成一份${reportType === 'daily' ? '工作日报' : '工作周报'}。
+
+要求：
+1. 从对话历史中提取工作相关内容（如讨论的项目、分析的数据、创建的文档等）
+2. 忽略闲聊和非工作内容
+3. 生成结构化报告
+
+报告格式：
+📅 ${reportType === 'daily' ? '工作日报' : '工作周报'} - [今天的日期]
+
+## 📌 主要工作内容
+- [提取的工作事项1]
+- [提取的工作事项2]
+
+## ✅ 完成情况
+- [已完成的工作]
+
+## 🔄 进行中/遇到问题
+- [正在处理的工作或遇到的问题]
+
+## 📋 ${reportType === 'daily' ? '明日计划' : '下周计划'}
+- [如果对话中提到了计划，在此列出]
+
+注意：
+- 使用清晰的标题和列表
+- 简洁专业，突出重点
+- 如果某个部分没有内容，可以省略该部分`;
+
+  const userPrompt = `基于以下对话历史，生成一份${reportType === 'daily' ? '今日工作日报' : '本周工作周报'}：
+
+对话历史：
+${history.map((msg, index) => `${index + 1}. ${msg.role === 'user' ? '我' : 'AI助手'}: ${msg.content.substring(0, 200)}${msg.content.length > 200 ? '...' : ''}`).join('\n\n')}
+
+请生成报告：`;
+
+  try {
+    const claudeResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+
+    console.log(`✅ ${reportType === 'daily' ? '日报' : '周报'}生成成功`);
+    return claudeResponse.content[0].text;
+  } catch (error) {
+    console.error('生成报告失败:', error);
+    throw error;
+  }
+}
+
+// ==================== 表格数据高级处理 ====================
+
+// 批量处理表格数据
+async function processTableData(bitableData, userMessage) {
+  console.log(`📊 开始高级处理表格数据: ${bitableData.tableName}`);
+
+  // 检测操作类型
+  let operation = '分析';
+  if (/筛选|过滤|查找|满足条件/i.test(userMessage)) {
+    operation = '筛选';
+  } else if (/统计|求和|平均|计数|总数|多少个/i.test(userMessage)) {
+    operation = '统计';
+  } else if (/排序|从高到低|从低到高|最大|最小|前.*名/i.test(userMessage)) {
+    operation = '排序';
+  } else if (/对比|比较|差异|变化/i.test(userMessage)) {
+    operation = '对比';
+  }
+
+  console.log(`🔍 检测到操作类型: ${operation}`);
+
+  const systemPrompt = `你是一个专业的数据分析助手。用户提供了一个飞书多维表格的数据，需要你进行「${operation}」操作。
+
+你的任务：
+1. 仔细分析表格的字段和数据
+2. 理解用户的具体需求
+3. 执行相应的数据处理操作
+4. 返回清晰、结构化的结果
+
+支持的操作：
+- 筛选：根据条件筛选符合要求的数据行
+- 统计：计算总和、平均值、计数、最大值、最小值等
+- 排序：按指定字段对数据进行排序
+- 对比：对比分析不同数据的差异和趋势
+
+输出要求：
+- 使用清晰的表格或列表格式
+- 突出关键数据和结论
+- 如果数据量大，只显示最相关的前10-20条`;
+
+  const userPrompt = `表格名称：${bitableData.tableName}
+
+字段列表：
+${bitableData.fields.map(f => `- ${f.name} (${f.type})`).join('\n')}
+
+数据记录（共 ${bitableData.records.length} 条，展示前50条）：
+${JSON.stringify(bitableData.records.slice(0, 50), null, 2)}
+
+用户要求：${userMessage}
+
+请执行「${operation}」操作并返回结果：`;
+
+  try {
+    const claudeResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+
+    console.log(`✅ 表格数据处理完成，操作类型: ${operation}`);
+    return claudeResponse.content[0].text;
+  } catch (error) {
+    console.error('表格数据处理失败:', error);
+    throw error;
+  }
 }
 
 // 健康检查接口
@@ -533,25 +700,44 @@ async function handleMessage(event) {
     // 检测是否请求创建表格（支持更灵活的模式）
     const requestCreateTable = /(创建|新建|生成).{0,20}(表格|多维表格|bitable)/i.test(userMessage);
 
+    // ==================== 新功能检测 ====================
+    // 检测是否请求生成日报/周报
+    const requestReport = /(生成|写|创建|帮我写).{0,10}(日报|周报|工作总结|今日总结|本周总结)/i.test(userMessage);
+    const isWeeklyReport = /周报|本周|这周|一周/i.test(userMessage);
+    // 检测是否查询最近文档
+    const requestRecentDocs = /最近.*文档|讨论.*文档|之前.*文档|看过.*文档|文档列表/i.test(userMessage);
+    // 检测是否需要表格高级处理（筛选、统计、排序、对比）
+    const requestTableAdvanced = bitableInfo.found && /筛选|过滤|统计|求和|平均|排序|对比|比较|查找.*满足|多少个|总数|最大|最小|前.*名/i.test(userMessage);
+
     if (bitableInfo.found) {
       console.log('🔍 检测到多维表格链接');
 
       try {
         // 发送"正在分析"提示
+        const tipText = requestTableAdvanced
+          ? '📊 正在处理表格数据，请稍候...'
+          : '📊 正在读取和分析表格数据，请稍候...';
+
         await feishuClient.im.message.create({
           params: { receive_id_type: 'chat_id' },
           data: {
             receive_id: chatId,
             msg_type: 'text',
-            content: JSON.stringify({ text: '📊 正在读取和分析表格数据，请稍候...' }),
+            content: JSON.stringify({ text: tipText }),
           },
         });
 
         // 获取表格数据
         const bitableData = await fetchBitableData(bitableInfo.appToken, bitableInfo.tableId);
 
-        // 分析表格数据
-        reply = await analyzeBitableData(bitableData, userMessage);
+        // 根据用户需求选择处理方式
+        if (requestTableAdvanced) {
+          // 高级处理：筛选、统计、排序、对比
+          reply = await processTableData(bitableData, userMessage);
+        } else {
+          // 普通分析
+          reply = await analyzeBitableData(bitableData, userMessage);
+        }
 
         // 记录到对话历史
         addToConversationHistory(chatId, 'user', userMessage);
@@ -583,6 +769,11 @@ async function handleMessage(event) {
 
         // 分析文档内容
         reply = await analyzeDocContent(docContent, userMessage);
+
+        // 将文档添加到缓存（用于"最近文档"查询）
+        const docTitle = `文档 ${docInfo.documentId.substring(0, 8)}...`;
+        const docSummary = reply.substring(0, 150);
+        addDocumentToCache(chatId, docInfo.documentId, docTitle, docSummary);
 
         // 记录到对话历史
         addToConversationHistory(chatId, 'user', userMessage);
@@ -724,6 +915,59 @@ async function handleMessage(event) {
         addToConversationHistory(chatId, 'user', userMessage);
         addToConversationHistory(chatId, 'assistant', reply);
       }
+    } else if (requestReport) {
+      // ==================== 新功能1: 生成日报/周报 ====================
+      console.log(`🔍 检测到${isWeeklyReport ? '周报' : '日报'}生成请求`);
+
+      try {
+        // 发送"正在生成"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: `📝 正在生成${isWeeklyReport ? '周报' : '日报'}，请稍候...` }),
+          },
+        });
+
+        const reportType = isWeeklyReport ? 'weekly' : 'daily';
+        reply = await generateWorkReport(chatId, reportType);
+
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+
+      } catch (error) {
+        console.error('生成报告失败:', error);
+        reply = `抱歉，生成报告时出现错误: ${error.message}`;
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+      }
+    } else if (requestRecentDocs) {
+      // ==================== 新功能2: 查询最近文档 ====================
+      console.log('🔍 检测到最近文档查询请求');
+
+      const recentDocs = getRecentDocuments(chatId);
+
+      if (recentDocs.length === 0) {
+        reply = '📄 暂无最近讨论的文档记录。\n\n💡 提示：发送文档链接给我分析后，我会记录下来。';
+      } else {
+        const docList = recentDocs.map((doc, index) => {
+          const timeStr = new Date(doc.time).toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+          return `${index + 1}. ${doc.title}\n   📅 时间: ${timeStr}\n   📝 摘要: ${doc.summary.substring(0, 80)}...`;
+        }).join('\n\n');
+
+        reply = `📚 最近讨论的文档（共 ${recentDocs.length} 个）：\n\n${docList}\n\n💡 提示：发送文档链接可以重新分析。`;
+      }
+
+      // 记录到对话历史
+      addToConversationHistory(chatId, 'user', userMessage);
+      addToConversationHistory(chatId, 'assistant', reply);
     } else {
       // 检测是否请求清除对话历史
       const requestClearHistory = /清除对话|重置对话|清空历史|新对话/i.test(userMessage);
@@ -754,17 +998,28 @@ async function handleMessage(event) {
 - 你可以帮助用户回答问题、进行对话交流
 - 你可以记住之前的对话内容，支持多轮对话
 
-📊 数据分析能力：
-- ✅ 分析飞书多维表格数据（用户发送表格链接）
-- ✅ 读取和分析飞书文档（用户发送文档链接）
-- ✅ 查看群组成员列表（用户询问"群成员"或"有哪些人"）
+## 📊 数据分析能力
+- **分析多维表格**：发送表格链接给我，我可以帮你分析数据、生成报告
+- **阅读文档**：发送文档链接，我可以总结内容、回答文档相关问题
+- **查看群成员**：询问"群成员有哪些"或"有哪些人"
 
-📝 创建能力：
-- ✅ 创建飞书文档（用户说"创建文档"或"生成文档"）
-- ✅ 创建多维表格（用户说"创建表格"或"新建表格"）
+## 📝 内容创建
+- **创建文档**：说"创建文档"或"生成文档"，我会帮你新建飞书文档
+- **创建表格**：说"创建表格"或"新建表格"，我会创建多维表格
 
-💡 其他功能：
-- 清除对话历史（用户说"清除对话"或"重置对话"）
+## 📈 高级数据处理（针对表格）
+- **数据筛选**：发送表格链接 + "筛选满足条件的数据"
+- **数据统计**：发送表格链接 + "统计总和/平均值/数量"
+- **数据排序**：发送表格链接 + "按某字段从高到低排序"
+- **数据对比**：发送表格链接 + "对比分析不同数据"
+
+## 📋 工作效率提升
+- **生成日报/周报**：说"生成今日工作日报"或"生成本周工作周报"，我会基于我们的对话历史自动生成
+- **查看最近文档**：说"最近讨论的文档"或"之前看过的文档"，我会列出最近分析过的文档列表
+
+## 💬 智能对话
+- **多轮对话**：我会记住我们的对话历史，你可以连续提问
+- **清除历史**：说"清除对话"或"重置对话"可以开始新话题
 
 回答风格：
 - 以飞书机器人的身份回答，不要说"我不在飞书中运行"
