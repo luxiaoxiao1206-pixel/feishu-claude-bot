@@ -1173,10 +1173,12 @@ async function handleMessage(event) {
         const claudeResponse = await anthropic.messages.create({
           model: 'claude-opus-4-1-20250805',
           max_tokens: 4096,
-          system: `你是一个飞书企业 AI 助手机器人，由 Claude AI 提供支持。
+          system: `你是一个飞书企业 AI 助手机器人，基于 Claude Opus 4.1 模型（最新最强大的 Claude AI 模型，发布于2025年8月）。
 
 你的身份和功能：
 - 你运行在飞书平台上，用户通过飞书与你对话
+- 你使用的是 Claude Opus 4.1 (claude-opus-4-1-20250805)，这是目前最强大的 Claude 模型
+- 你的知识截止日期是2025年1月，能够提供最新的信息和分析
 - 你可以帮助用户回答问题、进行对话交流
 - 你可以记住之前的对话内容，支持多轮对话
 
