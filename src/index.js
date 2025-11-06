@@ -575,8 +575,8 @@ async function createFeishuDoc(title, content) {
       console.log('💡 文档已创建，但内容需要手动填写');
     }
 
-    // 构建文档链接 - 使用飞书深链接格式，在客户端内打开
-    const docUrl = `https://applink.feishu.cn/client/docx/${documentId}`;
+    // 构建文档链接
+    const docUrl = `https://feishu.cn/docx/${documentId}`;
     console.log(`📄 文档链接: ${docUrl}`);
 
     return {
@@ -720,8 +720,8 @@ async function createBitableApp(name, userRequest = '') {
       }
     }
 
-    // 构建表格链接 - 使用飞书深链接格式，在客户端内打开
-    const bitableUrl = `https://applink.feishu.cn/client/bitable/${appToken}`;
+    // 构建表格链接
+    const bitableUrl = `https://feishu.cn/base/${appToken}`;
     console.log(`🎉 表格创建并填充完成: ${bitableUrl}`);
 
     return {
