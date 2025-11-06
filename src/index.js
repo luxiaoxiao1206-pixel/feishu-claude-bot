@@ -6,6 +6,19 @@ import axios from 'axios';
 
 dotenv.config();
 
+// 🔍 环境变量诊断日志
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('🔍 环境变量检查:');
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('FEISHU_APP_ID:', process.env.FEISHU_APP_ID ? '✅ 已配置' : '❌ 未配置');
+console.log('FEISHU_APP_SECRET:', process.env.FEISHU_APP_SECRET ? '✅ 已配置' : '❌ 未配置');
+console.log('FEISHU_ENCRYPT_KEY:', process.env.FEISHU_ENCRYPT_KEY ? '✅ 已配置' : '⚠️  未配置（可选）');
+console.log('CLAUDE_API_KEY:', process.env.CLAUDE_API_KEY ? '✅ 已配置' : '❌ 未配置');
+console.log('QWEATHER_API_KEY:', process.env.QWEATHER_API_KEY ? '✅ 已配置' : '❌ 未配置');
+console.log('QWEATHER_API_KEY 值:', process.env.QWEATHER_API_KEY || '(空)');
+console.log('PORT:', process.env.PORT || '3000');
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
