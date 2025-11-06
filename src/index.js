@@ -577,8 +577,8 @@ async function createFeishuDoc(title, content, userId) {
       console.log('💡 文档已创建，但内容需要手动填写');
     }
 
-    // 使用 SDK 返回的 URL，如果没有则构建默认链接
-    const docUrl = documentUrl || `https://feishu.cn/docx/${documentId}`;
+    // 使用 SDK 返回的 URL，如果没有则构建国际版Lark链接
+    const docUrl = documentUrl || `https://larksuite.com/docx/${documentId}`;
     console.log(`📄 最终使用的文档链接: ${docUrl}`);
 
     // 步骤3: 添加用户为协作者（让文档出现在用户的云空间）
@@ -586,7 +586,11 @@ async function createFeishuDoc(title, content, userId) {
       try {
         console.log(`👥 正在添加用户 ${userId} 为协作者...`);
         await feishuClient.drive.permissionMember.create({
-          path: { token: documentId, type: 'docx' },
+          path: { token: documentId },
+          params: {
+            type: 'docx',
+            need_notification: false
+          },
           data: {
             member_type: 'openid',
             member_id: userId,
@@ -595,7 +599,8 @@ async function createFeishuDoc(title, content, userId) {
         });
         console.log('✅ 协作权限添加成功');
       } catch (permError) {
-        console.warn('⚠️ 添加协作权限失败:', permError.message);
+        console.error('⚠️ 添加协作权限失败:', permError);
+        console.error('详细错误:', permError.response?.data);
         // 不影响文档创建，只是权限添加失败
       }
     }
@@ -743,8 +748,8 @@ async function createBitableApp(name, userRequest = '', userId = null) {
       }
     }
 
-    // 使用 SDK 返回的 URL，如果没有则构建默认链接
-    const bitableUrl = appUrl || `https://feishu.cn/base/${appToken}`;
+    // 使用 SDK 返回的 URL，如果没有则构建国际版Lark链接
+    const bitableUrl = appUrl || `https://larksuite.com/base/${appToken}`;
     console.log(`📄 最终使用的表格链接: ${bitableUrl}`);
     console.log(`🎉 表格创建并填充完成`);
 
@@ -753,7 +758,11 @@ async function createBitableApp(name, userRequest = '', userId = null) {
       try {
         console.log(`👥 正在添加用户 ${userId} 为协作者...`);
         await feishuClient.drive.permissionMember.create({
-          path: { token: appToken, type: 'bitable' },
+          path: { token: appToken },
+          params: {
+            type: 'bitable',
+            need_notification: false
+          },
           data: {
             member_type: 'openid',
             member_id: userId,
@@ -762,7 +771,8 @@ async function createBitableApp(name, userRequest = '', userId = null) {
         });
         console.log('✅ 协作权限添加成功');
       } catch (permError) {
-        console.warn('⚠️ 添加协作权限失败:', permError.message);
+        console.error('⚠️ 添加协作权限失败:', permError);
+        console.error('详细错误:', permError.response?.data);
         // 不影响表格创建，只是权限添加失败
       }
     }
@@ -820,7 +830,7 @@ async function handleMessage(event) {
     const messageEvent = event.event;
     const messageId = messageEvent.message.message_id;
     const chatId = messageEvent.message.chat_id;
-    const senderId = messageEvent.sender.sender_id.user_id;
+    const senderId = messageEvent.sender.sender_id.open_id || messageEvent.sender.sender_id.user_id;
 
     // 解析消息内容
     const content = JSON.parse(messageEvent.message.content);
