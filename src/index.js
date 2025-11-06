@@ -533,9 +533,11 @@ async function getCityLocation(cityName) {
       throw new Error('未配置和风天气API Key');
     }
 
+    const url = 'https://kg487rn6j8.re.qweatherapi.com/v2/city/lookup';
     console.log(`🔍 搜索城市: ${cityName}`);
+    console.log(`📡 请求URL: ${url}?location=${cityName}&key=${apiKey.substring(0, 8)}...`);
 
-    const response = await axios.get('https://kg487rn6j8.re.qweatherapi.com/v2/city/lookup', {
+    const response = await axios.get(url, {
       params: {
         location: cityName,
         key: apiKey,
@@ -543,8 +545,11 @@ async function getCityLocation(cityName) {
       }
     });
 
+    console.log(`📥 城市查询响应状态: ${response.status}`);
+    console.log(`📥 响应数据: ${JSON.stringify(response.data)}`);
+
     if (response.data.code !== '200' || !response.data.location || response.data.location.length === 0) {
-      throw new Error(`找不到城市: ${cityName}`);
+      throw new Error(`找不到城市: ${cityName}, API返回: ${response.data.code}`);
     }
 
     const location = response.data.location[0];
@@ -558,7 +563,11 @@ async function getCityLocation(cityName) {
       country: location.country
     };
   } catch (error) {
-    console.error('城市搜索失败:', error.message);
+    console.error('❌ 城市搜索失败:', error.message);
+    if (error.response) {
+      console.error(`   HTTP状态: ${error.response.status}`);
+      console.error(`   响应数据: ${JSON.stringify(error.response.data)}`);
+    }
     throw error;
   }
 }
@@ -567,8 +576,12 @@ async function getCityLocation(cityName) {
 async function getWeatherNow(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
+    const url = 'https://kg487rn6j8.re.qweatherapi.com/v7/weather/now';
 
-    const response = await axios.get('https://kg487rn6j8.re.qweatherapi.com/v7/weather/now', {
+    console.log(`🌡️ 获取实时天气, LocationID: ${locationId}`);
+    console.log(`📡 请求URL: ${url}?location=${locationId}&key=${apiKey.substring(0, 8)}...`);
+
+    const response = await axios.get(url, {
       params: {
         location: locationId,
         key: apiKey,
@@ -576,13 +589,20 @@ async function getWeatherNow(locationId) {
       }
     });
 
+    console.log(`📥 实时天气响应状态: ${response.status}`);
+    console.log(`📥 响应代码: ${response.data.code}`);
+
     if (response.data.code !== '200') {
-      throw new Error('获取天气数据失败');
+      throw new Error(`获取天气数据失败, API返回: ${response.data.code}`);
     }
 
     return response.data.now;
   } catch (error) {
-    console.error('获取实时天气失败:', error.message);
+    console.error('❌ 获取实时天气失败:', error.message);
+    if (error.response) {
+      console.error(`   HTTP状态: ${error.response.status}`);
+      console.error(`   响应数据: ${JSON.stringify(error.response.data)}`);
+    }
     throw error;
   }
 }
@@ -591,8 +611,12 @@ async function getWeatherNow(locationId) {
 async function getWeatherForecast(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
+    const url = 'https://kg487rn6j8.re.qweatherapi.com/v7/weather/3d';
 
-    const response = await axios.get('https://kg487rn6j8.re.qweatherapi.com/v7/weather/3d', {
+    console.log(`📅 获取天气预报, LocationID: ${locationId}`);
+    console.log(`📡 请求URL: ${url}?location=${locationId}&key=${apiKey.substring(0, 8)}...`);
+
+    const response = await axios.get(url, {
       params: {
         location: locationId,
         key: apiKey,
@@ -600,13 +624,20 @@ async function getWeatherForecast(locationId) {
       }
     });
 
+    console.log(`📥 天气预报响应状态: ${response.status}`);
+    console.log(`📥 响应代码: ${response.data.code}`);
+
     if (response.data.code !== '200') {
-      throw new Error('获取天气预报失败');
+      throw new Error(`获取天气预报失败, API返回: ${response.data.code}`);
     }
 
     return response.data.daily;
   } catch (error) {
-    console.error('获取天气预报失败:', error.message);
+    console.error('❌ 获取天气预报失败:', error.message);
+    if (error.response) {
+      console.error(`   HTTP状态: ${error.response.status}`);
+      console.error(`   响应数据: ${JSON.stringify(error.response.data)}`);
+    }
     throw error;
   }
 }
