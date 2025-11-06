@@ -510,7 +510,7 @@ async function analyzeDocContent(docContent, userQuestion) {
 }
 
 // 创建飞书文档并填充内容
-async function createFeishuDoc(title, content) {
+async function createFeishuDoc(title, content, userId) {
   try {
     console.log(`📝 开始创建文档: ${title}`);
 
@@ -581,6 +581,25 @@ async function createFeishuDoc(title, content) {
     const docUrl = documentUrl || `https://feishu.cn/docx/${documentId}`;
     console.log(`📄 最终使用的文档链接: ${docUrl}`);
 
+    // 步骤3: 添加用户为协作者（让文档出现在用户的云空间）
+    if (userId) {
+      try {
+        console.log(`👥 正在添加用户 ${userId} 为协作者...`);
+        await feishuClient.drive.permissionMember.create({
+          path: { token: documentId, type: 'docx' },
+          data: {
+            member_type: 'openid',
+            member_id: userId,
+            perm: 'edit'  // 编辑权限
+          }
+        });
+        console.log('✅ 协作权限添加成功');
+      } catch (permError) {
+        console.warn('⚠️ 添加协作权限失败:', permError.message);
+        // 不影响文档创建，只是权限添加失败
+      }
+    }
+
     return {
       documentId,
       url: docUrl,
@@ -596,7 +615,7 @@ async function createFeishuDoc(title, content) {
 }
 
 // 创建多维表格（增强版：支持自动填充数据）
-async function createBitableApp(name, userRequest = '') {
+async function createBitableApp(name, userRequest = '', userId = null) {
   try {
     console.log(`📊 开始创建多维表格: ${name}`);
     console.log(`📝 用户需求: ${userRequest}`);
@@ -728,6 +747,25 @@ async function createBitableApp(name, userRequest = '') {
     const bitableUrl = appUrl || `https://feishu.cn/base/${appToken}`;
     console.log(`📄 最终使用的表格链接: ${bitableUrl}`);
     console.log(`🎉 表格创建并填充完成`);
+
+    // 添加用户为协作者（让表格出现在用户的云空间）
+    if (userId) {
+      try {
+        console.log(`👥 正在添加用户 ${userId} 为协作者...`);
+        await feishuClient.drive.permissionMember.create({
+          path: { token: appToken, type: 'bitable' },
+          data: {
+            member_type: 'openid',
+            member_id: userId,
+            perm: 'edit'  // 编辑权限
+          }
+        });
+        console.log('✅ 协作权限添加成功');
+      } catch (permError) {
+        console.warn('⚠️ 添加协作权限失败:', permError.message);
+        // 不影响表格创建，只是权限添加失败
+      }
+    }
 
     return {
       appToken,
@@ -1043,8 +1081,8 @@ async function handleMessage(event) {
           throw new Error('文档数据不完整，缺少标题或内容');
         }
 
-        // 创建文档
-        const doc = await createFeishuDoc(docData.title, docData.content);
+        // 创建文档（传入用户ID以添加协作权限）
+        const doc = await createFeishuDoc(docData.title, docData.content, senderId);
 
         // 根据是否成功填充内容显示不同的消息
         if (doc.contentFilled) {
@@ -1086,8 +1124,8 @@ async function handleMessage(event) {
         const tableNameMatch = userMessage.match(/创建.*?["'《](.+?)["'》]|创建(.+?)表格/);
         const tableName = tableNameMatch ? (tableNameMatch[1] || tableNameMatch[2]) : '新建表格';
 
-        // 创建多维表格（传入完整用户需求）
-        const bitable = await createBitableApp(tableName, userMessage);
+        // 创建多维表格（传入完整用户需求和用户ID以添加协作权限）
+        const bitable = await createBitableApp(tableName, userMessage, senderId);
 
         reply = `✅ 多维表格创建成功并已自动填充数据！\n\n📊 表格名称: ${bitable.name}\n🔗 表格链接: ${bitable.url}\n📋 字段数量: ${bitable.fieldsCount}\n📝 数据记录: ${bitable.recordsCount} 条\n\n💡 提示：表格已包含示例数据，你可以直接查看或继续添加。`;
 
