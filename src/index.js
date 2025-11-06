@@ -509,12 +509,12 @@ async function analyzeDocContent(docContent, userQuestion) {
   }
 }
 
-// 创建飞书文档（简化版：只创建空文档）
+// 创建飞书文档并填充内容
 async function createFeishuDoc(title, content) {
   try {
     console.log(`📝 开始创建文档: ${title}`);
 
-    // 创建空文档
+    // 步骤1: 创建空文档
     const createResponse = await feishuClient.docx.document.create({
       data: {
         title: title
@@ -530,6 +530,51 @@ async function createFeishuDoc(title, content) {
     const documentId = createResponse.data.document.document_id;
     console.log(`✅ 文档创建成功: ${documentId}`);
 
+    // 步骤2: 尝试填充内容
+    let contentFilled = false;
+    try {
+      console.log('✍️ 尝试填充文档内容...');
+
+      // 等待文档初始化
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // 将内容分段
+      const lines = content.split('\n').filter(line => line.trim());
+      console.log(`📝 准备添加 ${lines.length} 行内容`);
+
+      // 构建块数组 - 使用最简单的文本块结构
+      const blocks = lines.slice(0, 50).map(line => ({
+        block_type: 2,
+        text: {
+          style: {},
+          elements: [{
+            text_run: {
+              content: line,
+              text_element_style: {}
+            }
+          }]
+        }
+      }));
+
+      // 尝试添加内容到文档
+      await feishuClient.docx.documentBlockChildren.create({
+        path: {
+          document_id: documentId,
+          block_id: documentId  // 尝试使用 document_id 作为 block_id
+        },
+        data: {
+          children: blocks
+        }
+      });
+
+      console.log('✅ 内容填充成功');
+      contentFilled = true;
+
+    } catch (contentError) {
+      console.warn('⚠️ 自动填充内容失败:', contentError.message);
+      console.log('💡 文档已创建，但内容需要手动填写');
+    }
+
     // 构建文档链接
     const docUrl = `https://feishu.cn/docx/${documentId}`;
     console.log(`📄 文档链接: ${docUrl}`);
@@ -538,7 +583,8 @@ async function createFeishuDoc(title, content) {
       documentId,
       url: docUrl,
       title,
-      contentSummary: content.substring(0, 200) + (content.length > 200 ? '...' : '')
+      contentFilled,
+      content: content
     };
   } catch (error) {
     console.error('创建文档失败:', error);
@@ -995,7 +1041,16 @@ async function handleMessage(event) {
         // 创建文档
         const doc = await createFeishuDoc(docData.title, docData.content);
 
-        reply = `✅ 文档创建成功！\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}\n\n📝 内容预览:\n${doc.contentSummary}\n\n💡 提示：请点击链接查看文档，并根据以下内容手动填写：\n\n${docData.content}`;
+        // 根据是否成功填充内容显示不同的消息
+        if (doc.contentFilled) {
+          // 内容已自动填充
+          const contentPreview = doc.content.substring(0, 300);
+          reply = `✅ 文档创建成功！内容已自动填充。\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}\n\n📝 内容预览:\n${contentPreview}${doc.content.length > 300 ? '...' : ''}\n\n💡 提示：点击链接查看完整文档。`;
+        } else {
+          // 内容未能自动填充，提供手动填写指引
+          const contentPreview = doc.content.substring(0, 200);
+          reply = `✅ 文档创建成功！\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}\n\n⚠️ 自动填充内容失败，请手动复制以下内容到文档中：\n\n📝 内容预览:\n${contentPreview}${doc.content.length > 200 ? '...' : ''}\n\n💡 完整内容已生成，请复制下方内容填入文档：\n\n${doc.content}`;
+        }
 
         // 记录到对话历史
         addToConversationHistory(chatId, 'user', userMessage);
