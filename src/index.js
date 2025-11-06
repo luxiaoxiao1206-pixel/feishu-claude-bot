@@ -149,7 +149,7 @@ ${history.map((msg, index) => `${index + 1}. ${msg.role === 'user' ? '我' : 'AI
 
   try {
     const claudeResponse = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-opus-4-1-20250805',
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
@@ -216,7 +216,7 @@ ${JSON.stringify(bitableData.records.slice(0, 50), null, 2)}
 
   try {
     const claudeResponse = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-opus-4-1-20250805',
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
@@ -393,7 +393,7 @@ ${JSON.stringify(sampleRecords, null, 2)}
 
     // 调用 Claude 分析
     const claudeResponse = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-opus-4-1-20250805',
       max_tokens: 4096,
       system: `你是一个飞书企业 AI 助手机器人，擅长分析多维表格数据。
 
@@ -484,7 +484,7 @@ async function analyzeDocContent(docContent, userQuestion) {
 
     // 调用 Claude 分析
     const claudeResponse = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-opus-4-1-20250805',
       max_tokens: 4096,
       system: `你是一个飞书企业 AI 助手机器人，擅长分析和总结文档内容。
 
@@ -602,7 +602,7 @@ async function createBitableApp(name, userRequest = '') {
     // 第1步：使用Claude生成表格结构和数据
     console.log('🤖 正在生成表格结构和数据...');
     const structureResponse = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-opus-4-1-20250805',
       max_tokens: 4096,
       system: `你是飞书表格结构设计助手。根据用户需求设计表格结构并生成示例数据。
 
@@ -988,7 +988,7 @@ async function handleMessage(event) {
 
         // 使用 Claude 生成文档标题和内容（改用简单分隔符格式）
         const claudeResponse = await anthropic.messages.create({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-opus-4-1-20250805',
           max_tokens: 4096,
           system: `你是一个飞书企业 AI 助手机器人。用户请求创建文档，你需要：
 1. 根据用户的描述生成合适的文档标题
@@ -1171,7 +1171,7 @@ async function handleMessage(event) {
         ];
 
         const claudeResponse = await anthropic.messages.create({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-opus-4-1-20250805',
           max_tokens: 4096,
           system: `你是一个飞书企业 AI 助手机器人，由 Claude AI 提供支持。
 
