@@ -509,6 +509,150 @@ async function analyzeDocContent(docContent, userQuestion) {
   }
 }
 
+// ==================== 天气查询功能 ====================
+
+// 查询城市LocationID（和风天气需要）
+async function getCityLocation(cityName) {
+  try {
+    const apiKey = process.env.QWEATHER_API_KEY;
+    if (!apiKey) {
+      throw new Error('未配置和风天气API Key');
+    }
+
+    console.log(`🔍 搜索城市: ${cityName}`);
+
+    const axios = require('axios');
+    const response = await axios.get('https://geoapi.qweather.com/v2/city/lookup', {
+      params: {
+        location: cityName,
+        key: apiKey,
+        lang: 'zh'
+      }
+    });
+
+    if (response.data.code !== '200' || !response.data.location || response.data.location.length === 0) {
+      throw new Error(`找不到城市: ${cityName}`);
+    }
+
+    const location = response.data.location[0];
+    console.log(`✅ 找到城市: ${location.name}, ${location.adm1}, ${location.country} (ID: ${location.id})`);
+
+    return {
+      id: location.id,
+      name: location.name,
+      adm1: location.adm1,  // 省份
+      adm2: location.adm2,  // 市
+      country: location.country
+    };
+  } catch (error) {
+    console.error('城市搜索失败:', error.message);
+    throw error;
+  }
+}
+
+// 获取实时天气
+async function getWeatherNow(locationId) {
+  try {
+    const apiKey = process.env.QWEATHER_API_KEY;
+    const axios = require('axios');
+
+    const response = await axios.get('https://devapi.qweather.com/v7/weather/now', {
+      params: {
+        location: locationId,
+        key: apiKey,
+        lang: 'zh'
+      }
+    });
+
+    if (response.data.code !== '200') {
+      throw new Error('获取天气数据失败');
+    }
+
+    return response.data.now;
+  } catch (error) {
+    console.error('获取实时天气失败:', error.message);
+    throw error;
+  }
+}
+
+// 获取天气预报（3天）
+async function getWeatherForecast(locationId) {
+  try {
+    const apiKey = process.env.QWEATHER_API_KEY;
+    const axios = require('axios');
+
+    const response = await axios.get('https://devapi.qweather.com/v7/weather/3d', {
+      params: {
+        location: locationId,
+        key: apiKey,
+        lang: 'zh'
+      }
+    });
+
+    if (response.data.code !== '200') {
+      throw new Error('获取天气预报失败');
+    }
+
+    return response.data.daily;
+  } catch (error) {
+    console.error('获取天气预报失败:', error.message);
+    throw error;
+  }
+}
+
+// 主天气查询函数
+async function queryWeather(cityName) {
+  try {
+    console.log(`🌤️ 开始查询天气: ${cityName}`);
+
+    // 1. 搜索城市
+    const location = await getCityLocation(cityName);
+
+    // 2. 获取实时天气
+    const now = await getWeatherNow(location.id);
+
+    // 3. 获取未来3天预报
+    const forecast = await getWeatherForecast(location.id);
+
+    // 4. 格式化天气信息
+    const weatherInfo = formatWeatherInfo(location, now, forecast);
+
+    return weatherInfo;
+  } catch (error) {
+    console.error('天气查询失败:', error.message);
+    throw error;
+  }
+}
+
+// 格式化天气信息
+function formatWeatherInfo(location, now, forecast) {
+  // 风向映射
+  const windDirMap = {
+    'N': '北风', 'NE': '东北风', 'E': '东风', 'SE': '东南风',
+    'S': '南风', 'SW': '西南风', 'W': '西风', 'NW': '西北风'
+  };
+
+  let message = `🌤️ ${location.name}实时天气\n\n`;
+  message += `📍 地点：${location.name}, ${location.adm1}\n`;
+  message += `🌡️ 温度：${now.temp}°C（体感 ${now.feelsLike}°C）\n`;
+  message += `🌈 天气：${now.text}\n`;
+  message += `💨 风力：${windDirMap[now.windDir] || now.windDir} ${now.windScale}级\n`;
+  message += `💧 湿度：${now.humidity}%\n`;
+  message += `👁️ 能见度：${now.vis}公里\n`;
+  message += `🌡️ 气压：${now.pressure}百帕\n\n`;
+
+  message += `📅 未来3天预报：\n`;
+  forecast.forEach((day, index) => {
+    const date = new Date(day.fxDate);
+    const dateStr = `${date.getMonth() + 1}月${date.getDate()}日`;
+    message += `• ${dateStr}：${day.textDay}，${day.tempMin}-${day.tempMax}°C\n`;
+  });
+
+  message += `\n⏰ 更新时间：${now.obsTime.replace('T', ' ').replace('+08:00', '')}`;
+
+  return message;
+}
+
 // 创建飞书文档并填充内容
 async function createFeishuDoc(title, content, userId) {
   try {
@@ -929,6 +1073,8 @@ async function handleMessage(event) {
     const requestCreateDoc = /(创建|新建|生成|写|整理成?).{0,20}(文档|doc)/i.test(userMessage);
     // 检测是否请求创建表格（支持更灵活的模式）
     const requestCreateTable = /(创建|新建|生成).{0,20}(表格|多维表格|bitable)/i.test(userMessage);
+    // 检测是否请求查询天气
+    const requestWeather = /(天气|气温|温度|下雨|降雨|晴天|阴天|多云)/.test(userMessage) || /(.+?)(天气|气温)/.test(userMessage);
 
     // ==================== 新功能检测 ====================
     // 检测是否请求生成日报/周报
@@ -1039,6 +1185,56 @@ async function handleMessage(event) {
       } catch (error) {
         console.error('获取群成员失败:', error);
         reply = `抱歉，获取群成员信息时出现错误: ${error.message}\n\n请确保机器人有权限查看群成员列表。`;
+        // 即使出错也记录到历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+      }
+    } else if (requestWeather) {
+      console.log('🌤️ 检测到天气查询请求');
+
+      try {
+        // 提取城市名称
+        let cityName = '北京';  // 默认城市
+
+        // 尝试从消息中提取城市名
+        const cityMatch = userMessage.match(/(.{2,10}?)(天气|气温|温度)/);
+        if (cityMatch) {
+          cityName = cityMatch[1].trim();
+          // 移除常见的前缀词
+          cityName = cityName.replace(/^(查询|查看|看看|今天|明天|的|我想知道|告诉我)/g, '').trim();
+        }
+
+        console.log(`🔍 查询城市: ${cityName}`);
+
+        // 发送"正在查询"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: `🌤️ 正在查询${cityName}天气，请稍候...` }),
+          },
+        });
+
+        // 查询天气
+        reply = await queryWeather(cityName);
+
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+
+      } catch (error) {
+        console.error('天气查询失败:', error);
+        reply = `抱歉，查询天气时出现错误: ${error.message}\n\n`;
+
+        if (error.message.includes('未配置')) {
+          reply += '请确保已配置和风天气API Key。';
+        } else if (error.message.includes('找不到城市')) {
+          reply += '请检查城市名称是否正确，或尝试使用更具体的城市名称（如"北京"而不是"京"）。';
+        } else {
+          reply += '请稍后再试或联系管理员。';
+        }
+
         // 即使出错也记录到历史
         addToConversationHistory(chatId, 'user', userMessage);
         addToConversationHistory(chatId, 'assistant', reply);
@@ -1257,6 +1453,7 @@ async function handleMessage(event) {
 - **分析多维表格**：发送表格链接给我，我可以帮你分析数据、生成报告
 - **阅读文档**：发送文档链接，我可以总结内容、回答文档相关问题
 - **查看群成员**：询问"群成员有哪些"或"有哪些人"
+- **查询天气**：询问"北京天气"或"上海天气怎么样"，我会提供实时天气和3天预报
 
 ## 📝 内容创建
 - **创建文档**：说"创建文档"或"生成文档"，我会帮你新建飞书文档并自动填充内容
