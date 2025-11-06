@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import * as lark from '@larksuiteoapi/node-sdk';
 import Anthropic from '@anthropic-ai/sdk';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -521,7 +522,6 @@ async function getCityLocation(cityName) {
 
     console.log(`🔍 搜索城市: ${cityName}`);
 
-    const axios = require('axios');
     const response = await axios.get('https://geoapi.qweather.com/v2/city/lookup', {
       params: {
         location: cityName,
@@ -554,7 +554,6 @@ async function getCityLocation(cityName) {
 async function getWeatherNow(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
-    const axios = require('axios');
 
     const response = await axios.get('https://devapi.qweather.com/v7/weather/now', {
       params: {
@@ -579,7 +578,6 @@ async function getWeatherNow(locationId) {
 async function getWeatherForecast(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
-    const axios = require('axios');
 
     const response = await axios.get('https://devapi.qweather.com/v7/weather/3d', {
       params: {
