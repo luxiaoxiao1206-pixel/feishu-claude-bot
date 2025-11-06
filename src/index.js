@@ -509,13 +509,12 @@ async function analyzeDocContent(docContent, userQuestion) {
   }
 }
 
-// 创建飞书文档
+// 创建飞书文档（简化版：只创建空文档）
 async function createFeishuDoc(title, content) {
   try {
     console.log(`📝 开始创建文档: ${title}`);
-    console.log(`📄 文档内容预览: ${content.substring(0, 100)}...`);
 
-    // 步骤1: 调用飞书 API 创建文档
+    // 创建空文档
     const createResponse = await feishuClient.docx.document.create({
       data: {
         title: title
@@ -531,78 +530,6 @@ async function createFeishuDoc(title, content) {
     const documentId = createResponse.data.document.document_id;
     console.log(`✅ 文档创建成功: ${documentId}`);
 
-    // 步骤2: 获取文档的根 block_id（使用 block list API）
-    console.log('📋 正在获取文档块列表...');
-
-    let blockId = null;
-    try {
-      // 使用 documentBlock.list 获取所有块
-      const blockListResponse = await feishuClient.docx.documentBlock.list({
-        path: { document_id: documentId },
-        params: {
-          page_size: 10
-        }
-      });
-
-      console.log('📊 块列表API响应:', JSON.stringify(blockListResponse.data, null, 2));
-
-      // 查找 page 类型的块（根块）
-      const pageBlock = blockListResponse.data?.items?.find(block => block.block_type === 1);
-
-      if (pageBlock) {
-        blockId = pageBlock.block_id;
-        console.log(`✅ 找到页面块: ${blockId}`);
-      }
-    } catch (e) {
-      console.warn('⚠️ 获取块列表失败:', e.message);
-    }
-
-    // 如果还是没有找到，尝试用 document.get
-    if (!blockId) {
-      try {
-        const docInfoResponse = await feishuClient.docx.document.get({
-          path: { document_id: documentId }
-        });
-        blockId = docInfoResponse.data?.document?.body?.block_id;
-        console.log(`✅ 从文档详情获取 block_id: ${blockId}`);
-      } catch (e) {
-        console.warn('⚠️ document.get 失败:', e.message);
-      }
-    }
-
-    if (!blockId) {
-      throw new Error('无法获取文档的 block_id，请稍后手动编辑文档');
-    }
-
-    console.log(`📍 使用 block_id: ${blockId}`);
-
-    // 步骤3: 向文档中添加内容
-    console.log('✍️ 正在添加文档内容...');
-
-    // 将内容分段（按换行符分割）
-    const paragraphs = content.split('\n').filter(p => p.trim());
-
-    // 构建文档块 - 使用完整的块结构
-    const children = paragraphs.map(paragraph => ({
-      block_type: 2, // 2 = 文本块 (paragraph)
-      paragraph: {
-        elements: [
-          {
-            text_run: {
-              content: paragraph
-            }
-          }
-        ]
-      }
-    }));
-
-    await feishuClient.docx.documentBlockChildren.create({
-      path: { document_id: documentId, block_id: blockId },
-      data: { children: children }
-    });
-
-    console.log('✅ 文档内容添加成功');
-
     // 构建文档链接
     const docUrl = `https://feishu.cn/docx/${documentId}`;
     console.log(`📄 文档链接: ${docUrl}`);
@@ -611,17 +538,11 @@ async function createFeishuDoc(title, content) {
       documentId,
       url: docUrl,
       title,
-      content
+      contentSummary: content.substring(0, 200) + (content.length > 200 ? '...' : '')
     };
   } catch (error) {
     console.error('创建文档失败:', error);
     console.error('错误详情:', error.response?.data || error.message);
-
-    // 如果是添加内容失败，提供更友好的错误信息
-    if (error.message.includes('block_id')) {
-      throw new Error('文档已创建但添加内容失败，请手动编辑文档');
-    }
-
     throw error;
   }
 }
@@ -1070,12 +991,7 @@ async function handleMessage(event) {
         // 创建文档
         const doc = await createFeishuDoc(docData.title, docData.content);
 
-        // 生成内容摘要
-        const contentPreview = doc.content.length > 200
-          ? doc.content.substring(0, 200) + '...'
-          : doc.content;
-
-        reply = `✅ 文档创建成功！\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}\n\n📝 内容摘要:\n${contentPreview}\n\n💡 提示：文档已自动填充内容。`;
+        reply = `✅ 文档创建成功！\n\n📄 文档标题: ${doc.title}\n🔗 文档链接: ${doc.url}\n\n📝 内容预览:\n${doc.contentSummary}\n\n💡 提示：请点击链接查看文档，并根据以下内容手动填写：\n\n${docData.content}`;
 
         // 记录到对话历史
         addToConversationHistory(chatId, 'user', userMessage);
