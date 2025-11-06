@@ -518,7 +518,6 @@ async function createFeishuDoc(title, content) {
     // 步骤1: 调用飞书 API 创建文档
     const createResponse = await feishuClient.docx.document.create({
       data: {
-        folder_token: '', // 空字符串表示创建在根目录
         title: title
       }
     });
@@ -561,10 +560,10 @@ async function createFeishuDoc(title, content) {
     // 将内容分段（按换行符分割）
     const paragraphs = content.split('\n').filter(p => p.trim());
 
-    // 构建文档块
+    // 构建文档块 - 使用完整的块结构
     const children = paragraphs.map(paragraph => ({
-      block_type: 2, // 2 = 文本块
-      text: {
+      block_type: 2, // 2 = 文本块 (paragraph)
+      paragraph: {
         elements: [
           {
             text_run: {
@@ -577,7 +576,10 @@ async function createFeishuDoc(title, content) {
 
     await feishuClient.docx.documentBlockChildren.create({
       path: { document_id: documentId, block_id: blockId },
-      data: { children }
+      data: {
+        children,
+        index: -1  // -1 表示追加到末尾
+      }
     });
 
     console.log('✅ 文档内容添加成功');
