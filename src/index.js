@@ -685,7 +685,44 @@ async function handleMessage(event) {
     const content = JSON.parse(messageEvent.message.content);
     const userMessage = content.text;
 
-    console.log(`收到消息 [${chatId}]: ${userMessage}`);
+    // 获取聊天类型
+    const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
+    const mentions = messageEvent.message.mentions || []; // @的用户列表
+
+    console.log(`收到消息 [${chatId}] [类型: ${chatType}]: ${userMessage}`);
+
+    // ==================== 群聊@检测 ====================
+    // 如果是群聊，必须@机器人才处理消息
+    if (chatType === 'group') {
+      // 检查是否@了机器人
+      const botId = process.env.FEISHU_BOT_ID; // 需要在环境变量中配置机器人ID
+
+      // 方法1: 如果配置了机器人ID，精确匹配
+      if (botId && mentions.length > 0) {
+        const isMentioned = mentions.some(mention =>
+          mention.id?.user_id === botId ||
+          mention.id?.open_id === botId ||
+          mention.user_id === botId ||
+          mention.open_id === botId
+        );
+
+        if (!isMentioned) {
+          console.log('⏭️ 群聊中未@机器人，跳过处理');
+          return; // 不处理未@机器人的群消息
+        }
+
+        console.log('✅ 群聊中检测到@机器人，开始处理消息');
+      }
+      // 方法2: 如果没有配置机器人ID，检查是否有任何@（向后兼容）
+      else if (mentions.length === 0) {
+        console.log('⏭️ 群聊中未@任何人，跳过处理');
+        return;
+      } else {
+        console.log('✅ 群聊中检测到@，开始处理消息（兼容模式）');
+      }
+    } else {
+      console.log('✅ 私聊消息，直接处理');
+    }
 
     let reply;
 
