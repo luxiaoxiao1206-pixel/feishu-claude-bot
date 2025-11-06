@@ -940,48 +940,52 @@ async function handleMessage(event) {
           },
         });
 
-        // 使用 Claude 生成文档标题和内容
+        // 使用 Claude 生成文档标题和内容（改用简单分隔符格式）
         const claudeResponse = await anthropic.messages.create({
           model: 'claude-sonnet-4-5-20250929',
           max_tokens: 4096,
           system: `你是一个飞书企业 AI 助手机器人。用户请求创建文档，你需要：
 1. 根据用户的描述生成合适的文档标题
 2. 生成详细的文档内容
-3. 返回格式必须是纯 JSON，格式: {"title": "文档标题", "content": "文档内容"}
-4. 内容要专业、清晰、结构化
+3. 内容要专业、清晰、结构化
 
-重要：只返回JSON对象，不要添加任何其他文字、标签或解释。`,
+返回格式（使用简单分隔符）：
+===TITLE===
+文档标题
+===CONTENT===
+文档的详细内容
+
+重要：严格按照上述格式返回，标题和内容之间用 ===TITLE=== 和 ===CONTENT=== 分隔。`,
           messages: [
             {
               role: 'user',
-              content: `用户请求: ${userMessage}\n\n请直接返回JSON格式的文档标题和内容，不要添加任何其他内容。`
+              content: `用户请求: ${userMessage}\n\n请按照格式返回文档标题和内容。`
             }
           ],
         });
 
-        // 提取 JSON（如果 Claude 返回了额外内容，尝试提取）
+        // 提取标题和内容
         let responseText = claudeResponse.content[0].text.trim();
-        console.log('📄 Claude原始响应:', responseText.substring(0, 200));
+        console.log('📄 Claude原始响应长度:', responseText.length);
+        console.log('📄 响应开头:', responseText.substring(0, 200));
 
-        // 如果包含 JSON 代码块标记，提取其中的内容
-        if (responseText.includes('```json')) {
-          const match = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-          if (match) responseText = match[1].trim();
-        } else if (responseText.includes('```')) {
-          const match = responseText.match(/```\s*([\s\S]*?)\s*```/);
-          if (match) responseText = match[1].trim();
-        }
+        // 使用分隔符提取标题和内容
+        const titleMatch = responseText.match(/===TITLE===\s*([\s\S]*?)\s*===CONTENT===/);
+        const contentMatch = responseText.match(/===CONTENT===\s*([\s\S]*?)$/);
 
-        console.log('📄 提取的JSON文本:', responseText.substring(0, 200));
-
-        let docData;
-        try {
-          docData = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error('❌ JSON解析失败:', parseError.message);
-          console.error('📄 完整响应文本:', responseText);
+        if (!titleMatch || !contentMatch) {
+          console.error('❌ 无法提取标题或内容');
+          console.error('📄 完整响应:', responseText.substring(0, 500));
           throw new Error('文档内容格式解析失败，请重新描述您的需求');
         }
+
+        const docData = {
+          title: titleMatch[1].trim(),
+          content: contentMatch[1].trim()
+        };
+
+        console.log('✅ 提取成功 - 标题:', docData.title);
+        console.log('✅ 提取成功 - 内容长度:', docData.content.length);
 
         // 验证必需字段
         if (!docData.title || !docData.content) {
