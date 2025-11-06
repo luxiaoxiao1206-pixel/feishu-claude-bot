@@ -528,7 +528,9 @@ async function createFeishuDoc(title, content) {
     }
 
     const documentId = createResponse.data.document.document_id;
+    const documentUrl = createResponse.data.document.url; // SDK 可能返回完整 URL
     console.log(`✅ 文档创建成功: ${documentId}`);
+    console.log(`📊 SDK返回的URL: ${documentUrl}`);
 
     // 步骤2: 尝试填充内容
     let contentFilled = false;
@@ -575,9 +577,9 @@ async function createFeishuDoc(title, content) {
       console.log('💡 文档已创建，但内容需要手动填写');
     }
 
-    // 构建文档链接
-    const docUrl = `https://feishu.cn/docx/${documentId}`;
-    console.log(`📄 文档链接: ${docUrl}`);
+    // 使用 SDK 返回的 URL，如果没有则构建默认链接
+    const docUrl = documentUrl || `https://feishu.cn/docx/${documentId}`;
+    console.log(`📄 最终使用的文档链接: ${docUrl}`);
 
     return {
       documentId,
@@ -683,7 +685,9 @@ async function createBitableApp(name, userRequest = '') {
     }
 
     const appToken = appResponse.data.app.app_token;
+    const appUrl = appResponse.data.app.url; // SDK 可能返回完整 URL
     console.log(`✅ Base App创建成功: ${appToken}`);
+    console.log(`📊 SDK返回的表格URL: ${appUrl}`);
 
     // 第3步：创建表格和字段
     const tableResponse = await feishuClient.bitable.appTable.create({
@@ -720,9 +724,10 @@ async function createBitableApp(name, userRequest = '') {
       }
     }
 
-    // 构建表格链接
-    const bitableUrl = `https://feishu.cn/base/${appToken}`;
-    console.log(`🎉 表格创建并填充完成: ${bitableUrl}`);
+    // 使用 SDK 返回的 URL，如果没有则构建默认链接
+    const bitableUrl = appUrl || `https://feishu.cn/base/${appToken}`;
+    console.log(`📄 最终使用的表格链接: ${bitableUrl}`);
+    console.log(`🎉 表格创建并填充完成`);
 
     return {
       appToken,
