@@ -690,15 +690,26 @@ async function handleMessage(event) {
     const mentions = messageEvent.message.mentions || []; // @的用户列表
 
     console.log(`收到消息 [${chatId}] [类型: ${chatType}]: ${userMessage}`);
+    console.log('📋 完整消息事件:', JSON.stringify(messageEvent, null, 2));
 
     // ==================== 群聊@检测 ====================
     // 如果是群聊，必须@机器人才处理消息
     if (chatType === 'group') {
+      console.log(`🔍 群聊消息检测 - mentions数量: ${mentions.length}`);
+      console.log('📋 mentions详情:', JSON.stringify(mentions, null, 2));
+
       // 检查是否@了机器人
       const botId = process.env.FEISHU_BOT_ID; // 需要在环境变量中配置机器人ID
+      console.log(`🤖 配置的Bot ID: ${botId || '未配置'}`);
 
       // 方法1: 如果配置了机器人ID，精确匹配
       if (botId && mentions.length > 0) {
+        console.log('🔍 使用精确匹配模式检测@');
+
+        mentions.forEach((mention, index) => {
+          console.log(`  mention[${index}]:`, JSON.stringify(mention, null, 2));
+        });
+
         const isMentioned = mentions.some(mention =>
           mention.id?.user_id === botId ||
           mention.id?.open_id === botId ||
