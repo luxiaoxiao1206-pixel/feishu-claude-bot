@@ -14,7 +14,7 @@ const feishuClient = new lark.Client({
   appId: process.env.FEISHU_APP_ID,
   appSecret: process.env.FEISHU_APP_SECRET,
   appType: lark.AppType.SelfBuild,
-  domain: lark.Domain.Feishu,
+  domain: lark.Domain.Lark, // 使用国际版 Lark (larksuite.com)
 });
 
 // 初始化加密工具（如果配置了 Encrypt Key）
