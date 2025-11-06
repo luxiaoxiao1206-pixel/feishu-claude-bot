@@ -710,12 +710,25 @@ async function handleMessage(event) {
           console.log(`  mention[${index}]:`, JSON.stringify(mention, null, 2));
         });
 
-        const isMentioned = mentions.some(mention =>
-          mention.id?.user_id === botId ||
-          mention.id?.open_id === botId ||
-          mention.user_id === botId ||
-          mention.open_id === botId
-        );
+        // 增强检测逻辑：支持多种匹配方式
+        const isMentioned = mentions.some(mention => {
+          // 方式1: 直接匹配各种ID字段
+          const idMatch =
+            mention.id?.user_id === botId ||
+            mention.id?.open_id === botId ||
+            mention.user_id === botId ||
+            mention.open_id === botId;
+
+          // 方式2: 检查是否@的是机器人（通过key判断）
+          const isBot = mention.key === '@_user_1' || mention.key?.includes('_user_');
+
+          // 方式3: 如果配置的是App ID (cli_开头)，则认为@了任何机器人都算
+          const isAppId = botId.startsWith('cli_');
+
+          console.log(`    检测结果: idMatch=${idMatch}, isBot=${isBot}, isAppId=${isAppId}`);
+
+          return idMatch || (isAppId && isBot);
+        });
 
         if (!isMentioned) {
           console.log('⏭️ 群聊中未@机器人，跳过处理');
