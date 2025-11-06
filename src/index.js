@@ -605,34 +605,130 @@ async function createFeishuDoc(title, content) {
   }
 }
 
-// 创建多维表格
-async function createBitableApp(name, description = '') {
+// 创建多维表格（增强版：支持自动填充数据）
+async function createBitableApp(name, userRequest = '') {
   try {
     console.log(`📊 开始创建多维表格: ${name}`);
+    console.log(`📝 用户需求: ${userRequest}`);
 
-    // 创建 Base App
-    const response = await feishuClient.bitable.app.create({
+    // 第1步：使用Claude生成表格结构和数据
+    console.log('🤖 正在生成表格结构和数据...');
+    const structureResponse = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 4096,
+      system: `你是飞书表格结构设计助手。根据用户需求设计表格结构并生成示例数据。
+
+返回格式（必须是有效JSON）：
+{
+  "tableName": "表格名称",
+  "fields": [
+    {"name": "字段1", "type": 1},
+    {"name": "字段2", "type": 2},
+    {"name": "字段3", "type": 3}
+  ],
+  "records": [
+    {"字段1": "值1", "字段2": 123, "字段3": "值3"},
+    {"字段1": "值2", "字段2": 456, "字段3": "值4"}
+  ]
+}
+
+字段类型说明：
+1 = 多行文本
+2 = 数字
+3 = 单选
+5 = 日期
+
+规则：
+1. 第一个字段必须是多行文本类型（作为主字段）
+2. 至少设计3个字段，最多8个字段
+3. 生成3-5条示例数据
+4. 只返回JSON，不要其他内容`,
+      messages: [{
+        role: 'user',
+        content: `用户需求：${userRequest || name}\n\n请设计表格结构并生成示例数据（只返回JSON）：`
+      }]
+    });
+
+    let tableStructure;
+    try {
+      let jsonText = structureResponse.content[0].text.trim();
+      // 提取JSON（如果有代码块）
+      if (jsonText.includes('```json')) {
+        const match = jsonText.match(/```json\s*([\s\S]*?)\s*```/);
+        if (match) jsonText = match[1].trim();
+      } else if (jsonText.includes('```')) {
+        const match = jsonText.match(/```\s*([\s\S]*?)\s*```/);
+        if (match) jsonText = match[1].trim();
+      }
+      tableStructure = JSON.parse(jsonText);
+      console.log('✅ 表格结构生成成功:', JSON.stringify(tableStructure, null, 2));
+    } catch (parseError) {
+      console.error('❌ JSON解析失败:', parseError);
+      console.log('原始响应:', structureResponse.content[0].text);
+      throw new Error('生成表格结构失败，JSON格式错误');
+    }
+
+    // 第2步：创建 Base App
+    const appResponse = await feishuClient.bitable.app.create({
       data: {
-        name: name,
-        folder_token: '' // 空字符串表示创建在根目录
+        name: tableStructure.tableName || name,
+        folder_token: ''
       }
     });
 
-    if (!response.data?.app?.app_token) {
+    if (!appResponse.data?.app?.app_token) {
       throw new Error('创建多维表格失败，未返回app_token');
     }
 
-    const appToken = response.data.app.app_token;
-    console.log(`✅ 多维表格创建成功: ${appToken}`);
+    const appToken = appResponse.data.app.app_token;
+    console.log(`✅ Base App创建成功: ${appToken}`);
+
+    // 第3步：创建表格和字段
+    const tableResponse = await feishuClient.bitable.appTable.create({
+      path: { app_token: appToken },
+      data: {
+        table: {
+          name: tableStructure.tableName || name,
+          default_view_name: '表格视图',
+          fields: tableStructure.fields
+        }
+      }
+    });
+
+    const tableId = tableResponse.data?.table_id;
+    if (!tableId) {
+      throw new Error('创建表格失败，未返回table_id');
+    }
+    console.log(`✅ 表格创建成功: ${tableId}`);
+
+    // 第4步：添加数据记录
+    if (tableStructure.records && tableStructure.records.length > 0) {
+      console.log(`📝 开始添加 ${tableStructure.records.length} 条记录...`);
+
+      for (const record of tableStructure.records) {
+        try {
+          await feishuClient.bitable.appTableRecord.create({
+            path: { app_token: appToken, table_id: tableId },
+            data: { fields: record }
+          });
+          console.log('✅ 记录添加成功');
+        } catch (recordError) {
+          console.error('⚠️ 添加记录失败:', recordError.message);
+        }
+      }
+    }
 
     // 构建表格链接
     const bitableUrl = `https://feishu.cn/base/${appToken}`;
-    console.log(`📊 表格链接: ${bitableUrl}`);
+    console.log(`🎉 表格创建并填充完成: ${bitableUrl}`);
 
     return {
       appToken,
+      tableId,
       url: bitableUrl,
-      name
+      name: tableStructure.tableName || name,
+      fieldsCount: tableStructure.fields.length,
+      recordsCount: tableStructure.records.length
     };
   } catch (error) {
     console.error('创建多维表格失败:', error);
@@ -960,10 +1056,10 @@ async function handleMessage(event) {
         const tableNameMatch = userMessage.match(/创建.*?["'《](.+?)["'》]|创建(.+?)表格/);
         const tableName = tableNameMatch ? (tableNameMatch[1] || tableNameMatch[2]) : '新建表格';
 
-        // 创建多维表格
-        const bitable = await createBitableApp(tableName);
+        // 创建多维表格（传入完整用户需求）
+        const bitable = await createBitableApp(tableName, userMessage);
 
-        reply = `✅ 多维表格创建成功！\n\n📊 表格名称: ${bitable.name}\n🔗 表格链接: ${bitable.url}\n\n💡 提示：你可以在表格中添加数据，然后发送链接给我分析。`;
+        reply = `✅ 多维表格创建成功并已自动填充数据！\n\n📊 表格名称: ${bitable.name}\n🔗 表格链接: ${bitable.url}\n📋 字段数量: ${bitable.fieldsCount}\n📝 数据记录: ${bitable.recordsCount} 条\n\n💡 提示：表格已包含示例数据，你可以直接查看或继续添加。`;
 
         // 记录到对话历史
         addToConversationHistory(chatId, 'user', userMessage);
@@ -1065,8 +1161,8 @@ async function handleMessage(event) {
 - **查看群成员**：询问"群成员有哪些"或"有哪些人"
 
 ## 📝 内容创建
-- **创建文档**：说"创建文档"或"生成文档"，我会帮你新建飞书文档
-- **创建表格**：说"创建表格"或"新建表格"，我会创建多维表格
+- **创建文档**：说"创建文档"或"生成文档"，我会帮你新建飞书文档并自动填充内容
+- **创建表格**：说"创建XX表格"，我会根据你的需求创建多维表格并自动填充示例数据（包括字段设计和数据记录）
 
 ## 📈 高级数据处理（针对表格）
 - **数据筛选**：发送表格链接 + "筛选满足条件的数据"
