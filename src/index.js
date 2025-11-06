@@ -1038,7 +1038,14 @@ async function handleMessage(event) {
 
     // 解析消息内容
     const content = JSON.parse(messageEvent.message.content);
-    const userMessage = content.text;
+    let userMessage = content.text;
+
+    // 清理消息：移除@机器人产生的标记（如 @_user_1、_user_1 等）
+    userMessage = userMessage
+      .replace(/@_user_\d+/g, '')  // 移除 @_user_1 这样的标记
+      .replace(/_user_\d+/g, '')   // 移除单独的 _user_1
+      .replace(/\s+/g, ' ')        // 合并多个空格
+      .trim();
 
     // 获取聊天类型
     const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
@@ -1235,7 +1242,7 @@ async function handleMessage(event) {
       console.log('🌤️ 检测到天气查询请求');
 
       try {
-        // 提取城市名称
+        // 提取城市名称（消息已在开始处清理过）
         let cityName = '北京';  // 默认城市
 
         // 尝试从消息中提取城市名
@@ -1246,7 +1253,7 @@ async function handleMessage(event) {
           cityName = cityName.replace(/^(查询|查看|看看|今天|明天|的|我想知道|告诉我)/g, '').trim();
         }
 
-        console.log(`🔍 查询城市: ${cityName}`);
+        console.log(`🔍 提取的城市名称: "${cityName}"`);
 
         // 发送"正在查询"提示
         await feishuClient.im.message.create({
