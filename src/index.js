@@ -535,7 +535,7 @@ async function getCityLocation(cityName) {
 
     console.log(`🔍 搜索城市: ${cityName}`);
 
-    const response = await axios.get('https://geoapi.qweather.com/v2/city/lookup', {
+    const response = await axios.get('https://kg487rn6j8.re.qweatherapi.com/v2/city/lookup', {
       params: {
         location: cityName,
         key: apiKey,
@@ -568,7 +568,7 @@ async function getWeatherNow(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
 
-    const response = await axios.get('https://api.qweather.com/v7/weather/now', {
+    const response = await axios.get('https://kg487rn6j8.re.qweatherapi.com/v7/weather/now', {
       params: {
         location: locationId,
         key: apiKey,
@@ -592,7 +592,7 @@ async function getWeatherForecast(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
 
-    const response = await axios.get('https://api.qweather.com/v7/weather/3d', {
+    const response = await axios.get('https://kg487rn6j8.re.qweatherapi.com/v7/weather/3d', {
       params: {
         location: locationId,
         key: apiKey,
