@@ -531,25 +531,47 @@ async function createFeishuDoc(title, content) {
     const documentId = createResponse.data.document.document_id;
     console.log(`✅ 文档创建成功: ${documentId}`);
 
-    // 步骤2: 获取文档详情以获取 block_id
-    console.log('📋 正在获取文档详情...');
+    // 步骤2: 获取文档的根 block_id（使用 block list API）
+    console.log('📋 正在获取文档块列表...');
 
-    // 方法1: 尝试通过 document.get 获取
     let blockId = null;
     try {
-      const docInfoResponse = await feishuClient.docx.document.get({
-        path: { document_id: documentId }
+      // 使用 documentBlock.list 获取所有块
+      const blockListResponse = await feishuClient.docx.documentBlock.list({
+        path: { document_id: documentId },
+        params: {
+          page_size: 10
+        }
       });
-      console.log('📊 文档详情API响应:', JSON.stringify(docInfoResponse.data, null, 2));
-      blockId = docInfoResponse.data?.document?.body?.block_id;
+
+      console.log('📊 块列表API响应:', JSON.stringify(blockListResponse.data, null, 2));
+
+      // 查找 page 类型的块（根块）
+      const pageBlock = blockListResponse.data?.items?.find(block => block.block_type === 1);
+
+      if (pageBlock) {
+        blockId = pageBlock.block_id;
+        console.log(`✅ 找到页面块: ${blockId}`);
+      }
     } catch (e) {
-      console.warn('⚠️ 通过 document.get 获取 block_id 失败:', e.message);
+      console.warn('⚠️ 获取块列表失败:', e.message);
     }
 
-    // 方法2: 如果方法1失败，使用 document_id 作为 block_id（根block）
+    // 如果还是没有找到，尝试用 document.get
     if (!blockId) {
-      console.log('📍 尝试使用 document_id 作为根 block_id');
-      blockId = documentId;
+      try {
+        const docInfoResponse = await feishuClient.docx.document.get({
+          path: { document_id: documentId }
+        });
+        blockId = docInfoResponse.data?.document?.body?.block_id;
+        console.log(`✅ 从文档详情获取 block_id: ${blockId}`);
+      } catch (e) {
+        console.warn('⚠️ document.get 失败:', e.message);
+      }
+    }
+
+    if (!blockId) {
+      throw new Error('无法获取文档的 block_id，请稍后手动编辑文档');
     }
 
     console.log(`📍 使用 block_id: ${blockId}`);
@@ -577,8 +599,8 @@ async function createFeishuDoc(title, content) {
     await feishuClient.docx.documentBlockChildren.create({
       path: { document_id: documentId, block_id: blockId },
       data: {
-        children,
-        index: -1  // -1 表示追加到末尾
+        children
+        // 不传 index 参数，默认追加到末尾
       }
     });
 
