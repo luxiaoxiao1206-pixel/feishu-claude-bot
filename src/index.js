@@ -568,7 +568,7 @@ async function getWeatherNow(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
 
-    const response = await axios.get('https://devapi.qweather.com/v7/weather/now', {
+    const response = await axios.get('https://api.qweather.com/v7/weather/now', {
       params: {
         location: locationId,
         key: apiKey,
@@ -592,7 +592,7 @@ async function getWeatherForecast(locationId) {
   try {
     const apiKey = process.env.QWEATHER_API_KEY;
 
-    const response = await axios.get('https://devapi.qweather.com/v7/weather/3d', {
+    const response = await axios.get('https://api.qweather.com/v7/weather/3d', {
       params: {
         location: locationId,
         key: apiKey,
