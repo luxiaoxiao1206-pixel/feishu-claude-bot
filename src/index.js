@@ -544,32 +544,50 @@ async function createFeishuDoc(title, content, userId) {
       const lines = content.split('\n').filter(line => line.trim());
       console.log(`📝 准备添加 ${lines.length} 行内容`);
 
-      // 构建块数组 - 使用最简单的文本块结构
-      const blocks = lines.slice(0, 50).map(line => ({
-        block_type: 2,
-        text: {
-          style: {},
-          elements: [{
-            text_run: {
-              content: line,
-              text_element_style: {}
-            }
-          }]
-        }
-      }));
+      // 飞书API限制：单次最多添加500个块，我们分批处理
+      const BATCH_SIZE = 500;
+      const totalBatches = Math.ceil(lines.length / BATCH_SIZE);
 
-      // 尝试添加内容到文档
-      await feishuClient.docx.documentBlockChildren.create({
-        path: {
-          document_id: documentId,
-          block_id: documentId  // 尝试使用 document_id 作为 block_id
-        },
-        data: {
-          children: blocks
-        }
-      });
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        const start = batchIndex * BATCH_SIZE;
+        const end = Math.min(start + BATCH_SIZE, lines.length);
+        const batchLines = lines.slice(start, end);
 
-      console.log('✅ 内容填充成功');
+        console.log(`📄 填充批次 ${batchIndex + 1}/${totalBatches}: ${batchLines.length} 行 (${start + 1}-${end})`);
+
+        // 构建块数组 - 使用最简单的文本块结构
+        const blocks = batchLines.map(line => ({
+          block_type: 2,
+          text: {
+            style: {},
+            elements: [{
+              text_run: {
+                content: line,
+                text_element_style: {}
+              }
+            }]
+          }
+        }));
+
+        // 添加内容到文档
+        await feishuClient.docx.documentBlockChildren.create({
+          path: {
+            document_id: documentId,
+            block_id: documentId
+          },
+          data: {
+            children: blocks,
+            index: start  // 指定插入位置
+          }
+        });
+
+        // 批次间添加短暂延迟，避免API限流
+        if (batchIndex < totalBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      console.log(`✅ 内容填充成功 - 共 ${lines.length} 行，${totalBatches} 个批次`);
       contentFilled = true;
 
     } catch (contentError) {
