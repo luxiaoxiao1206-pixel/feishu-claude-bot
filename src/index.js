@@ -598,10 +598,7 @@ async function createFeishuDoc(title, content) {
 
     await feishuClient.docx.documentBlockChildren.create({
       path: { document_id: documentId, block_id: blockId },
-      data: {
-        children
-        // 不传 index 参数，默认追加到末尾
-      }
+      data: { children: children }
     });
 
     console.log('✅ 文档内容添加成功');
@@ -1043,6 +1040,7 @@ async function handleMessage(event) {
 
         // 提取 JSON（如果 Claude 返回了额外内容，尝试提取）
         let responseText = claudeResponse.content[0].text.trim();
+        console.log('📄 Claude原始响应:', responseText.substring(0, 200));
 
         // 如果包含 JSON 代码块标记，提取其中的内容
         if (responseText.includes('```json')) {
@@ -1053,7 +1051,21 @@ async function handleMessage(event) {
           if (match) responseText = match[1].trim();
         }
 
-        const docData = JSON.parse(responseText);
+        console.log('📄 提取的JSON文本:', responseText.substring(0, 200));
+
+        let docData;
+        try {
+          docData = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('❌ JSON解析失败:', parseError.message);
+          console.error('📄 完整响应文本:', responseText);
+          throw new Error('文档内容格式解析失败，请重新描述您的需求');
+        }
+
+        // 验证必需字段
+        if (!docData.title || !docData.content) {
+          throw new Error('文档数据不完整，缺少标题或内容');
+        }
 
         // 创建文档
         const doc = await createFeishuDoc(docData.title, docData.content);
