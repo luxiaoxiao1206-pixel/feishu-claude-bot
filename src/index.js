@@ -63,8 +63,9 @@ function addToConversationHistory(chatId, role, content) {
   const history = getConversationHistory(chatId);
   history.push({ role, content });
 
-  // 保留最近10轮对话（20条消息），避免超过 token 限制
-  const MAX_MESSAGES = 20;
+  // 保留最近100轮对话（200条消息）
+  // Claude Opus 4.1 支持200K tokens上下文窗口，足够处理长对话
+  const MAX_MESSAGES = 200;
   if (history.length > MAX_MESSAGES) {
     history.splice(0, history.length - MAX_MESSAGES);
   }
