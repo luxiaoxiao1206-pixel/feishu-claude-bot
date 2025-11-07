@@ -862,20 +862,19 @@ async function handleMessage(event) {
     const chatId = messageEvent.message.chat_id;
     const senderId = messageEvent.sender.sender_id.open_id || messageEvent.sender.sender_id.user_id;
 
-    // 获取消息类型和聊天类型
-    const msgType = messageEvent.message.msg_type; // text, image, file, etc.
+    // 获取聊天类型和@列表
     const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
     const mentions = messageEvent.message.mentions || []; // @的用户列表
-
-    // 只处理文本消息，忽略图片、文件等其他类型
-    if (msgType !== 'text') {
-      console.log(`⏭️ 跳过非文本消息 [类型: ${msgType}]`);
-      return;
-    }
 
     // 解析消息内容
     const content = JSON.parse(messageEvent.message.content);
     const rawMessage = content.text || '';
+
+    // 只处理文本消息，忽略图片、文件等其他类型
+    if (!rawMessage) {
+      console.log(`⏭️ 跳过非文本消息（content中无text字段）`);
+      return;
+    }
 
     console.log(`收到原始消息 [${chatId}] [类型: ${chatType}]: "${rawMessage}"`);
 
