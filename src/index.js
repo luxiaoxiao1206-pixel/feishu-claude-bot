@@ -1015,14 +1015,13 @@ async function handleMessage(event) {
     const messageId = messageEvent.message.message_id;
     const chatId = messageEvent.message.chat_id;
     const senderId = messageEvent.sender.sender_id.open_id || messageEvent.sender.sender_id.user_id;
-    const msgType = messageEvent.message.msg_type; // 消息类型：text, file, image, media等
+    const msgType = messageEvent.message.message_type; // ✅ 修复：使用正确的字段名 message_type
 
     // 🔍 调试日志：打印消息类型和内容结构
     console.log(`\n========== 收到消息 [${messageId}] ==========`);
-    console.log(`📝 消息类型 (msg_type): "${msgType}"`);
+    console.log(`📝 消息类型 (message_type): "${msgType}"`);
     console.log(`💬 聊天ID: ${chatId}`);
     console.log(`👤 发送者: ${senderId}`);
-    console.log(`📦 完整消息体:`, JSON.stringify(messageEvent.message, null, 2));
 
     // 获取聊天类型和@列表
     const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
@@ -1032,10 +1031,9 @@ async function handleMessage(event) {
     const content = JSON.parse(messageEvent.message.content);
 
     // ==================== 文件消息自动记录 ====================
-    // 如果是文件/图片/视频等，自动记录到缓存（不需要@机器人）
-    console.log(`🔍 检查是否为文件消息: msgType="${msgType}"`);
+    // 策略：文件消息记录到缓存和对话历史，但不回复（静默记录）
     if (msgType === 'file' || msgType === 'image' || msgType === 'media') {
-      console.log(`✅ 检测到文件类型消息！开始记录...`);
+      console.log(`📎 检测到文件类型消息！开始静默记录...`);
       const createTime = new Date().toLocaleString('zh-CN');
       let fileInfo = {
         messageId,
@@ -1056,22 +1054,28 @@ async function handleMessage(event) {
         fileInfo.name = fileName;
       }
 
-      // 添加到文件缓存
+      // 1. 添加到文件缓存
       addFileToCache(chatId, fileInfo);
-      console.log(`✅ 文件已自动记录: ${fileInfo.name} [${fileInfo.type}]`);
-      return; // 文件消息处理完毕，不继续处理
+      console.log(`✅ 文件已记录到缓存: ${fileInfo.name} [${fileInfo.type}]`);
+
+      // 2. 添加到对话历史（让AI知道有文件被发送）
+      const contextMessage = `[用户发送了${fileInfo.type}: ${fileInfo.name}]`;
+      addToConversationHistory(chatId, 'user', contextMessage);
+      console.log(`✅ 文件上下文已记录到对话历史`);
+
+      return; // 文件消息静默处理完毕，不回复
     }
 
     // ==================== 文本消息处理 ====================
     const rawMessage = content.text || '';
 
-    // 只处理文本消息，忽略其他未知类型
+    // 跳过没有文本内容的消息
     if (!rawMessage) {
       console.log(`⏭️ 跳过非文本消息（content中无text字段）`);
       return;
     }
 
-    console.log(`收到原始消息 [${chatId}] [类型: ${chatType}]: "${rawMessage}"`);
+    console.log(`📨 收到文本消息 [${chatId}] [类型: ${chatType}]: "${rawMessage}"`);
 
     // ==================== 引用消息检测 ====================
     // 检查是否引用了之前的消息（飞书的"回复"功能）
@@ -1097,70 +1101,64 @@ async function handleMessage(event) {
       }
     }
 
-    // ==================== 群聊@检测 ====================
-    // 如果是群聊，必须@机器人才处理消息（在清理消息之前检查）
-    if (chatType === 'group') {
-      console.log(`🔍 群聊消息检测 - mentions数量: ${mentions.length}`);
-      console.log('📋 mentions详情:', JSON.stringify(mentions, null, 2));
-
-      // 检查是否@了机器人
-      const botId = process.env.FEISHU_BOT_ID; // 需要在环境变量中配置机器人ID
-      console.log(`🤖 配置的Bot ID: ${botId || '未配置'}`);
-
-      // 方法1: 如果配置了机器人ID，精确匹配
-      if (botId && mentions.length > 0) {
-        console.log('🔍 使用精确匹配模式检测@');
-
-        mentions.forEach((mention, index) => {
-          console.log(`  mention[${index}]:`, JSON.stringify(mention, null, 2));
-        });
-
-        // 增强检测逻辑：支持多种匹配方式
-        const isMentioned = mentions.some(mention => {
-          // 方式1: 直接匹配各种ID字段
-          const idMatch =
-            mention.id?.user_id === botId ||
-            mention.id?.open_id === botId ||
-            mention.user_id === botId ||
-            mention.open_id === botId;
-
-          // 方式2: 检查是否@的是机器人（通过key判断）
-          const isBot = mention.key === '@_user_1' || mention.key?.includes('_user_');
-
-          // 方式3: 如果配置的是App ID (cli_开头)，则认为@了任何机器人都算
-          const isAppId = botId.startsWith('cli_');
-
-          console.log(`    检测结果: idMatch=${idMatch}, isBot=${isBot}, isAppId=${isAppId}`);
-
-          return idMatch || (isAppId && isBot);
-        });
-
-        if (!isMentioned) {
-          console.log('⏭️ 群聊中未@机器人，跳过处理');
-          return; // 不处理未@机器人的群消息
-        }
-
-        console.log('✅ 群聊中检测到@机器人，开始处理消息');
-      }
-      // 方法2: 如果没有配置机器人ID，检查是否有任何@（向后兼容）
-      else if (mentions.length === 0) {
-        console.log('⏭️ 群聊中未@任何人，跳过处理');
-        return;
-      } else {
-        console.log('✅ 群聊中检测到@，开始处理消息（兼容模式）');
-      }
-    } else {
-      console.log('✅ 私聊消息，直接处理');
-    }
-
-    // 清理消息：移除@机器人产生的标记（如 @_user_1、_user_1 等）
+    // ==================== 清理消息文本 ====================
+    // 先清理消息：移除@机器人产生的标记（如 @_user_1、_user_1 等）
     let userMessage = rawMessage
       .replace(/@_user_\d+/g, '')  // 移除 @_user_1 这样的标记
       .replace(/_user_\d+/g, '')   // 移除单独的 _user_1
       .replace(/\s+/g, ' ')        // 合并多个空格
       .trim();
 
-    console.log(`清理后的消息: "${userMessage}"`);
+    console.log(`📝 清理后的消息: "${userMessage}"`);
+
+    // ==================== 群聊@检测 ====================
+    // 策略：先记录所有消息到对话历史，然后判断是否需要回复
+    let shouldReply = false; // 是否需要AI回复
+
+    if (chatType === 'group') {
+      console.log(`🔍 群聊消息检测 - mentions数量: ${mentions.length}`);
+
+      // 检查是否@了机器人
+      const botId = process.env.FEISHU_BOT_ID;
+      console.log(`🤖 配置的Bot ID: ${botId || '未配置'}`);
+
+      // 方法1: 如果配置了机器人ID，精确匹配
+      if (botId && mentions.length > 0) {
+        // 增强检测逻辑：支持多种匹配方式
+        const isMentioned = mentions.some(mention => {
+          const idMatch =
+            mention.id?.user_id === botId ||
+            mention.id?.open_id === botId ||
+            mention.user_id === botId ||
+            mention.open_id === botId;
+
+          const isBot = mention.key === '@_user_1' || mention.key?.includes('_user_');
+          const isAppId = botId.startsWith('cli_');
+
+          return idMatch || (isAppId && isBot);
+        });
+
+        shouldReply = isMentioned;
+        console.log(isMentioned ? '✅ 检测到@机器人，将回复' : '📝 未@机器人，仅记录不回复');
+      }
+      // 方法2: 如果没有配置机器人ID，检查是否有任何@（向后兼容）
+      else {
+        shouldReply = mentions.length > 0;
+        console.log(shouldReply ? '✅ 检测到@，将回复（兼容模式）' : '📝 未@任何人，仅记录不回复');
+      }
+
+      // ✅ 关键改进：群聊中即使没@，也记录到对话历史
+      if (!shouldReply) {
+        // 记录到对话历史（让机器人了解上下文）
+        addToConversationHistory(chatId, 'user', userMessage);
+        console.log(`✅ 群聊消息已静默记录到对话历史（不回复）`);
+        return; // 不回复
+      }
+    } else {
+      // 私聊消息始终回复
+      shouldReply = true;
+      console.log('✅ 私聊消息，将回复');
+    }
 
     // 如果清理后消息为空，但用户@了机器人，给出友好提示
     if (!userMessage || userMessage.length === 0) {
