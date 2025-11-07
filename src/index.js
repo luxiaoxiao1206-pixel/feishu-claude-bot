@@ -878,6 +878,30 @@ async function handleMessage(event) {
 
     console.log(`收到原始消息 [${chatId}] [类型: ${chatType}]: "${rawMessage}"`);
 
+    // ==================== 引用消息检测 ====================
+    // 检查是否引用了之前的消息（飞书的"回复"功能）
+    let quotedMessage = null;
+    const parentId = messageEvent.message.parent_id;
+
+    if (parentId) {
+      console.log(`📌 检测到引用消息，parent_id: ${parentId}`);
+      try {
+        // 获取被引用的消息内容
+        const parentMessageResponse = await feishuClient.im.message.get({
+          path: { message_id: parentId },
+        });
+
+        if (parentMessageResponse.data?.message) {
+          const parentContent = JSON.parse(parentMessageResponse.data.message.content);
+          quotedMessage = parentContent.text || '';
+          console.log(`✅ 成功获取引用消息内容: "${quotedMessage.substring(0, 100)}..."`);
+        }
+      } catch (error) {
+        console.error('❌ 获取引用消息失败:', error.message);
+        // 继续处理，即使无法获取引用消息
+      }
+    }
+
     // ==================== 群聊@检测 ====================
     // 如果是群聊，必须@机器人才处理消息（在清理消息之前检查）
     if (chatType === 'group') {
@@ -1274,12 +1298,24 @@ async function handleMessage(event) {
         // 普通对话 - 使用对话历史
         const history = getConversationHistory(chatId);
 
+        // 如果有引用消息，将其添加到用户消息中作为上下文
+        let finalUserMessage = userMessage;
+        if (quotedMessage) {
+          finalUserMessage = `【用户引用了之前的消息】
+引用内容："""
+${quotedMessage}
+"""
+
+用户当前的问题：${userMessage}`;
+          console.log(`📝 已将引用消息添加到上下文中`);
+        }
+
         // 构建消息数组：历史 + 当前消息
         const messages = [
           ...history,
           {
             role: 'user',
-            content: userMessage
+            content: finalUserMessage
           }
         ];
 
@@ -1315,7 +1351,8 @@ async function handleMessage(event) {
 - **查看最近文档**：说"最近讨论的文档"或"之前看过的文档"，我会列出最近分析过的文档列表
 
 ## 💬 智能对话
-- **多轮对话**：我会记住我们的对话历史，你可以连续提问
+- **多轮对话**：我会记住我们的对话历史（最多100轮），你可以连续提问
+- **引用回复**：使用飞书的"回复"功能引用我的消息，我会理解你在回复哪条内容
 - **清除历史**：说"清除对话"或"重置对话"可以开始新话题
 
 回答风格：
