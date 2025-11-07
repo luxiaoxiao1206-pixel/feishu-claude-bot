@@ -340,15 +340,33 @@ app.post('/webhook/event', async (req, res) => {
 
 // 解析飞书多维表格 URL
 function extractBitableUrl(text) {
-  // 匹配飞书多维表格链接
-  const bitableRegex = /https?:\/\/[^/]+\/base\/([a-zA-Z0-9]+)(?:\?table=([a-zA-Z0-9]+))?/;
+  // 匹配飞书多维表格链接（支持各种参数和锚点）
+  const bitableRegex = /https?:\/\/[^/\s]+\/base\/([a-zA-Z0-9_-]+)(?:\?[^#\s]*table=([a-zA-Z0-9_-]+))?/;
   const match = text.match(bitableRegex);
 
   if (match) {
+    const appToken = match[1];
+    let tableId = match[2] || null;
+
+    // 🔍 调试日志：打印解析结果
+    console.log(`🔍 URL解析结果: appToken="${appToken}", tableId="${tableId}"`);
+    console.log(`📎 原始URL: ${match[0]}`);
+
+    // 如果没有解析到 tableId，尝试从 URL 对象中提取
+    if (!tableId && match[0].includes('?')) {
+      try {
+        const url = new URL(match[0]);
+        tableId = url.searchParams.get('table');
+        console.log(`🔍 使用 URL 对象解析 tableId: "${tableId}"`);
+      } catch (e) {
+        console.log('⚠️ URL 对象解析失败:', e.message);
+      }
+    }
+
     return {
       found: true,
-      appToken: match[1],
-      tableId: match[2] || null,
+      appToken,
+      tableId,
       fullUrl: match[0]
     };
   }
@@ -361,19 +379,41 @@ async function fetchBitableData(appToken, tableId = null) {
   try {
     console.log(`📊 开始获取多维表格数据: appToken=${appToken}, tableId=${tableId}`);
 
-    // 如果没有指定 tableId，获取第一个表格
+    // 如果没有指定 tableId，或者指定的 tableId 无效，获取第一个表格
+    let shouldGetFirstTable = !tableId;
+    let originalTableId = tableId;
+
     if (!tableId) {
-      const tablesResponse = await feishuClient.bitable.appTable.list({
-        path: { app_token: appToken },
-        params: { page_size: 1 }
-      });
+      console.log('⚠️ 未提供 tableId，将获取第一个可用表格');
+      shouldGetFirstTable = true;
+    }
 
-      if (!tablesResponse.data?.items || tablesResponse.data.items.length === 0) {
-        throw new Error('多维表格中没有找到表格');
+    // 获取所有表格列表（用于验证或选择）
+    const tablesResponse = await feishuClient.bitable.appTable.list({
+      path: { app_token: appToken },
+      params: { page_size: 50 }
+    });
+
+    if (!tablesResponse.data?.items || tablesResponse.data.items.length === 0) {
+      throw new Error('多维表格中没有找到任何表格');
+    }
+
+    console.log(`📋 该多维表格共有 ${tablesResponse.data.items.length} 个数据表`);
+
+    // 如果指定了 tableId，验证它是否存在
+    if (originalTableId) {
+      const tableExists = tablesResponse.data.items.some(t => t.table_id === originalTableId);
+      if (!tableExists) {
+        console.log(`⚠️ 指定的 tableId "${originalTableId}" 不存在，将使用第一个表格`);
+        shouldGetFirstTable = true;
       }
+    }
 
+    // 如果需要使用第一个表格
+    if (shouldGetFirstTable) {
       tableId = tablesResponse.data.items[0].table_id;
-      console.log(`📋 使用第一个表格: ${tableId}`);
+      const tableName = tablesResponse.data.items[0].name;
+      console.log(`📋 使用第一个表格: ${tableName} (${tableId})`);
     }
 
     // 获取字段信息
