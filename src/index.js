@@ -862,9 +862,26 @@ async function handleMessage(event) {
     const chatId = messageEvent.message.chat_id;
     const senderId = messageEvent.sender.sender_id.open_id || messageEvent.sender.sender_id.user_id;
 
+    // 获取消息类型和聊天类型
+    const msgType = messageEvent.message.msg_type; // text, image, file, etc.
+    const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
+    const mentions = messageEvent.message.mentions || []; // @的用户列表
+
+    // 只处理文本消息，忽略图片、文件等其他类型
+    if (msgType !== 'text') {
+      console.log(`⏭️ 跳过非文本消息 [类型: ${msgType}]`);
+      return;
+    }
+
     // 解析消息内容
     const content = JSON.parse(messageEvent.message.content);
     let userMessage = content.text;
+
+    // 检查文本内容是否存在
+    if (!userMessage) {
+      console.log('⏭️ 消息内容为空，跳过处理');
+      return;
+    }
 
     // 清理消息：移除@机器人产生的标记（如 @_user_1、_user_1 等）
     userMessage = userMessage
@@ -873,11 +890,7 @@ async function handleMessage(event) {
       .replace(/\s+/g, ' ')        // 合并多个空格
       .trim();
 
-    // 获取聊天类型
-    const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
-    const mentions = messageEvent.message.mentions || []; // @的用户列表
-
-    console.log(`收到消息 [${chatId}] [类型: ${chatType}]: ${userMessage}`);
+    console.log(`收到消息 [${chatId}] [类型: ${chatType}] [消息类型: ${msgType}]: ${userMessage}`);
     console.log('📋 完整消息事件:', JSON.stringify(messageEvent, null, 2));
 
     // ==================== 群聊@检测 ====================
