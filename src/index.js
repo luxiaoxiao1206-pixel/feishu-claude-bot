@@ -875,26 +875,12 @@ async function handleMessage(event) {
 
     // 解析消息内容
     const content = JSON.parse(messageEvent.message.content);
-    let userMessage = content.text;
+    const rawMessage = content.text || '';
 
-    // 检查文本内容是否存在
-    if (!userMessage) {
-      console.log('⏭️ 消息内容为空，跳过处理');
-      return;
-    }
-
-    // 清理消息：移除@机器人产生的标记（如 @_user_1、_user_1 等）
-    userMessage = userMessage
-      .replace(/@_user_\d+/g, '')  // 移除 @_user_1 这样的标记
-      .replace(/_user_\d+/g, '')   // 移除单独的 _user_1
-      .replace(/\s+/g, ' ')        // 合并多个空格
-      .trim();
-
-    console.log(`收到消息 [${chatId}] [类型: ${chatType}] [消息类型: ${msgType}]: ${userMessage}`);
-    console.log('📋 完整消息事件:', JSON.stringify(messageEvent, null, 2));
+    console.log(`收到原始消息 [${chatId}] [类型: ${chatType}]: "${rawMessage}"`);
 
     // ==================== 群聊@检测 ====================
-    // 如果是群聊，必须@机器人才处理消息
+    // 如果是群聊，必须@机器人才处理消息（在清理消息之前检查）
     if (chatType === 'group') {
       console.log(`🔍 群聊消息检测 - mentions数量: ${mentions.length}`);
       console.log('📋 mentions详情:', JSON.stringify(mentions, null, 2));
@@ -947,6 +933,31 @@ async function handleMessage(event) {
       }
     } else {
       console.log('✅ 私聊消息，直接处理');
+    }
+
+    // 清理消息：移除@机器人产生的标记（如 @_user_1、_user_1 等）
+    let userMessage = rawMessage
+      .replace(/@_user_\d+/g, '')  // 移除 @_user_1 这样的标记
+      .replace(/_user_\d+/g, '')   // 移除单独的 _user_1
+      .replace(/\s+/g, ' ')        // 合并多个空格
+      .trim();
+
+    console.log(`清理后的消息: "${userMessage}"`);
+
+    // 如果清理后消息为空，但用户@了机器人，给出友好提示
+    if (!userMessage || userMessage.length === 0) {
+      console.log('⚠️ 消息内容为空');
+      reply = '你好！有什么我可以帮助你的吗？😊';
+
+      await feishuClient.im.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: chatId,
+          msg_type: 'text',
+          content: JSON.stringify({ text: reply }),
+        },
+      });
+      return;
     }
 
     let reply;
