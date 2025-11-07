@@ -854,6 +854,39 @@ async function getChatMembers(chatId) {
   }
 }
 
+// 根据文件名识别文件类型
+function getFileType(fileName) {
+  if (!fileName) return '其他文件';
+
+  const ext = fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+
+  if (!ext) return '其他文件';
+
+  // 文档类
+  if (['doc', 'docx'].includes(ext)) return 'Word文档';
+  if (['xls', 'xlsx', 'csv'].includes(ext)) return 'Excel表格';
+  if (['ppt', 'pptx'].includes(ext)) return 'PPT演示';
+  if (['pdf'].includes(ext)) return 'PDF文档';
+  if (['txt', 'md', 'log'].includes(ext)) return '文本文件';
+
+  // 图片类
+  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) return '图片';
+
+  // 视频类
+  if (['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'].includes(ext)) return '视频';
+
+  // 音频类
+  if (['mp3', 'wav', 'flac', 'aac', 'm4a', 'wma', 'ogg'].includes(ext)) return '音频';
+
+  // 压缩包
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '压缩包';
+
+  // 代码文件
+  if (['js', 'ts', 'py', 'java', 'cpp', 'c', 'html', 'css', 'json', 'xml'].includes(ext)) return '代码文件';
+
+  return '其他文件';
+}
+
 // 获取群聊历史消息中的文件列表
 async function getChatFiles(chatId, limit = 50) {
   try {
@@ -892,9 +925,10 @@ async function getChatFiles(chatId, limit = 50) {
 
         // 根据消息类型提取文件信息
         if (msgType === 'file') {
+          const fileName = content.file_name || '未命名文件';
           files.push({
-            type: '文件',
-            name: content.file_name || '未命名文件',
+            type: getFileType(fileName), // 使用智能识别
+            name: fileName,
             time: createTime,
             sender: msg.sender?.sender_id?.open_id || '未知'
           });
@@ -906,9 +940,10 @@ async function getChatFiles(chatId, limit = 50) {
             sender: msg.sender?.sender_id?.open_id || '未知'
           });
         } else if (msgType === 'media') {
+          const fileName = content.file_name || '媒体文件';
           files.push({
-            type: '视频/音频',
-            name: content.file_name || '媒体文件',
+            type: getFileType(fileName), // 使用智能识别
+            name: fileName,
             time: createTime,
             sender: msg.sender?.sender_id?.open_id || '未知'
           });
