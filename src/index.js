@@ -50,6 +50,10 @@ const conversationHistory = new Map();
 // key: chatId, value: [{docId, title, summary, time}]
 const documentCache = new Map();
 
+// 文件缓存存储 - 记录群聊中的文件
+// key: chatId, value: [{type, name, time, sender, messageId}]
+const fileCache = new Map();
+
 // 获取对话历史
 function getConversationHistory(chatId) {
   if (!conversationHistory.has(chatId)) {
@@ -109,6 +113,31 @@ function addDocumentToCache(chatId, docId, title, summary) {
 // 获取最近的文档
 function getRecentDocuments(chatId) {
   return documentCache.get(chatId) || [];
+}
+
+// ==================== 文件缓存管理 ====================
+
+// 添加文件到缓存
+function addFileToCache(chatId, fileInfo) {
+  if (!fileCache.has(chatId)) {
+    fileCache.set(chatId, []);
+  }
+  const files = fileCache.get(chatId);
+
+  // 添加新文件到开头（最新的在前面）
+  files.unshift(fileInfo);
+
+  // 只保留最近100个文件
+  if (files.length > 100) {
+    files.pop();
+  }
+
+  console.log(`📁 [${chatId}] 文件已缓存: ${fileInfo.name} (类型: ${fileInfo.type})`);
+}
+
+// 获取缓存的文件列表
+function getCachedFiles(chatId) {
+  return fileCache.get(chatId) || [];
 }
 
 // ==================== 工作报告生成 ====================
@@ -986,6 +1015,7 @@ async function handleMessage(event) {
     const messageId = messageEvent.message.message_id;
     const chatId = messageEvent.message.chat_id;
     const senderId = messageEvent.sender.sender_id.open_id || messageEvent.sender.sender_id.user_id;
+    const msgType = messageEvent.message.msg_type; // 消息类型：text, file, image, media等
 
     // 获取聊天类型和@列表
     const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
@@ -993,9 +1023,40 @@ async function handleMessage(event) {
 
     // 解析消息内容
     const content = JSON.parse(messageEvent.message.content);
+
+    // ==================== 文件消息自动记录 ====================
+    // 如果是文件/图片/视频等，自动记录到缓存（不需要@机器人）
+    if (msgType === 'file' || msgType === 'image' || msgType === 'media') {
+      const createTime = new Date().toLocaleString('zh-CN');
+      let fileInfo = {
+        messageId,
+        time: createTime,
+        sender: senderId
+      };
+
+      if (msgType === 'file') {
+        const fileName = content.file_name || '未命名文件';
+        fileInfo.type = getFileType(fileName);
+        fileInfo.name = fileName;
+      } else if (msgType === 'image') {
+        fileInfo.type = '图片';
+        fileInfo.name = content.image_key ? `图片_${content.image_key.slice(0, 8)}` : '图片';
+      } else if (msgType === 'media') {
+        const fileName = content.file_name || '媒体文件';
+        fileInfo.type = getFileType(fileName);
+        fileInfo.name = fileName;
+      }
+
+      // 添加到文件缓存
+      addFileToCache(chatId, fileInfo);
+      console.log(`✅ 文件已自动记录: ${fileInfo.name} [${fileInfo.type}]`);
+      return; // 文件消息处理完毕，不继续处理
+    }
+
+    // ==================== 文本消息处理 ====================
     const rawMessage = content.text || '';
 
-    // 只处理文本消息，忽略图片、文件等其他类型
+    // 只处理文本消息，忽略其他未知类型
     if (!rawMessage) {
       console.log(`⏭️ 跳过非文本消息（content中无text字段）`);
       return;
@@ -1415,63 +1476,45 @@ async function handleMessage(event) {
       addToConversationHistory(chatId, 'user', userMessage);
       addToConversationHistory(chatId, 'assistant', reply);
     } else if (requestFileList) {
-      // ==================== 新功能3: 汇总群文件 ====================
+      // ==================== 新功能3: 汇总群文件（使用缓存） ====================
       console.log('📁 检测到群文件汇总请求');
 
-      try {
-        // 发送"正在获取"提示
-        await feishuClient.im.message.create({
-          params: { receive_id_type: 'chat_id' },
-          data: {
-            receive_id: chatId,
-            msg_type: 'text',
-            content: JSON.stringify({ text: '📁 正在获取群文件列表，请稍候...' }),
-          },
+      // 获取缓存的文件列表（无需API调用，即时返回）
+      const files = getCachedFiles(chatId);
+
+      if (files.length === 0) {
+        reply = '📁 暂无文件记录。\n\n💡 提示：从现在开始，我会自动记录群里发送的所有文件（不需要@我）。发送文件后再试试"汇总文件"吧！';
+      } else {
+        // 按类型分类
+        const filesByType = {};
+        files.forEach(file => {
+          if (!filesByType[file.type]) {
+            filesByType[file.type] = [];
+          }
+          filesByType[file.type].push(file);
         });
 
-        // 获取群文件列表（默认最近50条消息）
-        const files = await getChatFiles(chatId, 100);
+        // 生成分类清单
+        let fileList = `📁 群文件汇总（共 ${files.length} 个文件）：\n\n`;
 
-        if (files.length === 0) {
-          reply = '📁 未找到群聊中的文件记录。\n\n💡 提示：我只能看到最近100条消息中的文件。';
-        } else {
-          // 按类型分类
-          const filesByType = {};
-          files.forEach(file => {
-            if (!filesByType[file.type]) {
-              filesByType[file.type] = [];
-            }
-            filesByType[file.type].push(file);
+        Object.keys(filesByType).forEach(type => {
+          const typeFiles = filesByType[type];
+          fileList += `\n### ${type}（${typeFiles.length}个）\n`;
+          typeFiles.slice(0, 20).forEach((file, index) => {
+            fileList += `${index + 1}. ${file.name}\n   ⏰ ${file.time}\n`;
           });
+          if (typeFiles.length > 20) {
+            fileList += `   ... 还有 ${typeFiles.length - 20} 个${type}\n`;
+          }
+        });
 
-          // 生成分类清单
-          let fileList = `📁 群文件汇总（最近100条消息，共 ${files.length} 个文件）：\n\n`;
-
-          Object.keys(filesByType).forEach(type => {
-            const typeFiles = filesByType[type];
-            fileList += `\n### ${type}（${typeFiles.length}个）\n`;
-            typeFiles.slice(0, 20).forEach((file, index) => {
-              fileList += `${index + 1}. ${file.name}\n   ⏰ ${file.time}\n`;
-            });
-            if (typeFiles.length > 20) {
-              fileList += `   ... 还有 ${typeFiles.length - 20} 个${type}\n`;
-            }
-          });
-
-          fileList += '\n\n💡 提示：发送具体文件可以进行分析处理。';
-          reply = fileList;
-        }
-
-        // 记录到对话历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
-
-      } catch (error) {
-        console.error('获取群文件列表失败:', error);
-        reply = `抱歉，获取群文件列表时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限读取群消息历史\n2. 这是一个群聊（私聊无文件列表）`;
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        fileList += '\n\n💡 提示：我会自动记录群里的所有文件（无需@我），最多保留最近100个文件。';
+        reply = fileList;
       }
+
+      // 记录到对话历史
+      addToConversationHistory(chatId, 'user', userMessage);
+      addToConversationHistory(chatId, 'assistant', reply);
     } else {
       // 检测是否请求清除对话历史
       const requestClearHistory = /清除对话|重置对话|清空历史|新对话/i.test(userMessage);
