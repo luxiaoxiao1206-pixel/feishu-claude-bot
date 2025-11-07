@@ -854,6 +854,85 @@ async function getChatMembers(chatId) {
   }
 }
 
+// 获取群聊历史消息中的文件列表
+async function getChatFiles(chatId, limit = 50) {
+  try {
+    console.log(`📁 开始获取群文件列表: chatId=${chatId}, limit=${limit}`);
+
+    const files = [];
+    let pageToken = undefined;
+    let fetchedCount = 0;
+
+    // 最多获取指定数量的消息
+    while (fetchedCount < limit) {
+      const response = await feishuClient.im.message.list({
+        params: {
+          container_id_type: 'chat',
+          container_id: chatId,
+          page_size: Math.min(50, limit - fetchedCount),
+          page_token: pageToken
+        }
+      });
+
+      const messages = response.data?.items || [];
+      console.log(`📨 获取到 ${messages.length} 条消息`);
+
+      // 筛选包含文件的消息
+      for (const msg of messages) {
+        const msgType = msg.msg_type;
+        const createTime = new Date(parseInt(msg.create_time)).toLocaleString('zh-CN');
+
+        // 解析消息内容
+        let content = {};
+        try {
+          content = JSON.parse(msg.body?.content || '{}');
+        } catch (e) {
+          console.log('解析消息内容失败:', e.message);
+        }
+
+        // 根据消息类型提取文件信息
+        if (msgType === 'file') {
+          files.push({
+            type: '文件',
+            name: content.file_name || '未命名文件',
+            time: createTime,
+            sender: msg.sender?.sender_id?.open_id || '未知'
+          });
+        } else if (msgType === 'image') {
+          files.push({
+            type: '图片',
+            name: content.image_key ? `图片_${content.image_key.slice(0, 8)}` : '图片',
+            time: createTime,
+            sender: msg.sender?.sender_id?.open_id || '未知'
+          });
+        } else if (msgType === 'media') {
+          files.push({
+            type: '视频/音频',
+            name: content.file_name || '媒体文件',
+            time: createTime,
+            sender: msg.sender?.sender_id?.open_id || '未知'
+          });
+        }
+      }
+
+      fetchedCount += messages.length;
+
+      // 检查是否还有更多消息
+      if (!response.data?.has_more || !response.data?.page_token) {
+        break;
+      }
+      pageToken = response.data.page_token;
+    }
+
+    console.log(`📁 共找到 ${files.length} 个文件`);
+    return files;
+  } catch (error) {
+    console.error('获取群文件列表失败:', error);
+    console.error('错误详情:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
 // 处理消息
 async function handleMessage(event) {
   try {
@@ -1002,6 +1081,8 @@ async function handleMessage(event) {
     const isWeeklyReport = /周报|本周|这周|一周/i.test(userMessage);
     // 检测是否查询最近文档
     const requestRecentDocs = /最近.*文档|讨论.*文档|之前.*文档|看过.*文档|文档列表/i.test(userMessage);
+    // 检测是否请求汇总群文件
+    const requestFileList = /汇总.*文件|分类.*文件|整理.*文件|群.*文件|发过.*文件|历史.*文件|文件列表|文件清单/i.test(userMessage);
     // 检测是否需要表格高级处理（筛选、统计、排序、对比）
     const requestTableAdvanced = bitableInfo.found && /筛选|过滤|统计|求和|平均|排序|对比|比较|查找.*满足|多少个|总数|最大|最小|前.*名/i.test(userMessage);
 
@@ -1287,6 +1368,64 @@ async function handleMessage(event) {
       // 记录到对话历史
       addToConversationHistory(chatId, 'user', userMessage);
       addToConversationHistory(chatId, 'assistant', reply);
+    } else if (requestFileList) {
+      // ==================== 新功能3: 汇总群文件 ====================
+      console.log('📁 检测到群文件汇总请求');
+
+      try {
+        // 发送"正在获取"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: '📁 正在获取群文件列表，请稍候...' }),
+          },
+        });
+
+        // 获取群文件列表（默认最近50条消息）
+        const files = await getChatFiles(chatId, 100);
+
+        if (files.length === 0) {
+          reply = '📁 未找到群聊中的文件记录。\n\n💡 提示：我只能看到最近100条消息中的文件。';
+        } else {
+          // 按类型分类
+          const filesByType = {};
+          files.forEach(file => {
+            if (!filesByType[file.type]) {
+              filesByType[file.type] = [];
+            }
+            filesByType[file.type].push(file);
+          });
+
+          // 生成分类清单
+          let fileList = `📁 群文件汇总（最近100条消息，共 ${files.length} 个文件）：\n\n`;
+
+          Object.keys(filesByType).forEach(type => {
+            const typeFiles = filesByType[type];
+            fileList += `\n### ${type}（${typeFiles.length}个）\n`;
+            typeFiles.slice(0, 20).forEach((file, index) => {
+              fileList += `${index + 1}. ${file.name}\n   ⏰ ${file.time}\n`;
+            });
+            if (typeFiles.length > 20) {
+              fileList += `   ... 还有 ${typeFiles.length - 20} 个${type}\n`;
+            }
+          });
+
+          fileList += '\n\n💡 提示：发送具体文件可以进行分析处理。';
+          reply = fileList;
+        }
+
+        // 记录到对话历史
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+
+      } catch (error) {
+        console.error('获取群文件列表失败:', error);
+        reply = `抱歉，获取群文件列表时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限读取群消息历史\n2. 这是一个群聊（私聊无文件列表）`;
+        addToConversationHistory(chatId, 'user', userMessage);
+        addToConversationHistory(chatId, 'assistant', reply);
+      }
     } else {
       // 检测是否请求清除对话历史
       const requestClearHistory = /清除对话|重置对话|清空历史|新对话/i.test(userMessage);
