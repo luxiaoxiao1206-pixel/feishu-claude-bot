@@ -382,8 +382,20 @@ async function fetchBitableData(appToken, tableId = null) {
       params: { page_size: 100 }
     });
 
+    // 🔍 详细调试日志
+    console.log('📦 字段API完整响应:', JSON.stringify(fieldsResponse, null, 2));
+    console.log('📦 响应码:', fieldsResponse.code);
+    console.log('📦 响应消息:', fieldsResponse.msg);
+
     const fields = fieldsResponse.data?.items || [];
     console.log(`📝 获取到 ${fields.length} 个字段`);
+
+    if (fields.length === 0) {
+      console.log('⚠️ 字段为空！可能原因：');
+      console.log('  1. 机器人不是表格协作者');
+      console.log('  2. 表格权限设置为私密');
+      console.log('  3. appToken 或 tableId 错误');
+    }
 
     // 获取记录数据（最多100条）
     const recordsResponse = await feishuClient.bitable.appTableRecord.list({
@@ -391,8 +403,17 @@ async function fetchBitableData(appToken, tableId = null) {
       params: { page_size: 100 }
     });
 
+    // 🔍 详细调试日志
+    console.log('📦 记录API完整响应:', JSON.stringify(recordsResponse, null, 2));
+    console.log('📦 响应码:', recordsResponse.code);
+    console.log('📦 响应消息:', recordsResponse.msg);
+
     const records = recordsResponse.data?.items || [];
     console.log(`📊 获取到 ${records.length} 条记录`);
+
+    if (records.length === 0 && fields.length > 0) {
+      console.log('⚠️ 有字段但无记录，可能表格是空的');
+    }
 
     return {
       fields,
