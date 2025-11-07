@@ -1017,6 +1017,13 @@ async function handleMessage(event) {
     const senderId = messageEvent.sender.sender_id.open_id || messageEvent.sender.sender_id.user_id;
     const msgType = messageEvent.message.msg_type; // 消息类型：text, file, image, media等
 
+    // 🔍 调试日志：打印消息类型和内容结构
+    console.log(`\n========== 收到消息 [${messageId}] ==========`);
+    console.log(`📝 消息类型 (msg_type): "${msgType}"`);
+    console.log(`💬 聊天ID: ${chatId}`);
+    console.log(`👤 发送者: ${senderId}`);
+    console.log(`📦 完整消息体:`, JSON.stringify(messageEvent.message, null, 2));
+
     // 获取聊天类型和@列表
     const chatType = messageEvent.message.chat_type; // 'p2p' 私聊 | 'group' 群聊
     const mentions = messageEvent.message.mentions || []; // @的用户列表
@@ -1026,7 +1033,9 @@ async function handleMessage(event) {
 
     // ==================== 文件消息自动记录 ====================
     // 如果是文件/图片/视频等，自动记录到缓存（不需要@机器人）
+    console.log(`🔍 检查是否为文件消息: msgType="${msgType}"`);
     if (msgType === 'file' || msgType === 'image' || msgType === 'media') {
+      console.log(`✅ 检测到文件类型消息！开始记录...`);
       const createTime = new Date().toLocaleString('zh-CN');
       let fileInfo = {
         messageId,
