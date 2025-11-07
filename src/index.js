@@ -898,14 +898,25 @@ async function getChatFiles(chatId, limit = 50) {
 
     // 最多获取指定数量的消息
     while (fetchedCount < limit) {
-      const response = await feishuClient.im.message.list({
-        params: {
-          container_id_type: 'chat',
-          container_id: chatId,
-          page_size: Math.min(50, limit - fetchedCount),
-          page_token: pageToken
-        }
-      });
+      console.log(`🔍 正在请求消息列表，page_size=${Math.min(50, limit - fetchedCount)}, page_token=${pageToken || '(首页)'}`);
+
+      let response;
+      try {
+        response = await feishuClient.im.message.list({
+          params: {
+            container_id_type: 'chat',
+            container_id: chatId,
+            page_size: Math.min(50, limit - fetchedCount),
+            ...(pageToken && { page_token: pageToken })
+          }
+        });
+      } catch (apiError) {
+        console.error('❌ API调用失败:', apiError);
+        console.error('错误响应:', JSON.stringify(apiError.response?.data || apiError.message, null, 2));
+        throw new Error(`获取消息列表失败: ${apiError.response?.data?.msg || apiError.message}`);
+      }
+
+      console.log('📊 API响应状态:', response.code, response.msg);
 
       const messages = response.data?.items || [];
       console.log(`📨 获取到 ${messages.length} 条消息`);
