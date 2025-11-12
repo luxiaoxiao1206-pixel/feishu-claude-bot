@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import * as lark from '@larksuiteoapi/node-sdk';
 import Anthropic from '@anthropic-ai/sdk';
+import * as db from './database.js';
 
 dotenv.config();
 
@@ -42,7 +43,21 @@ const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
 });
 
-// 对话历史存储 - 使用 Map 存储每个聊天的历史记录
+// 初始化数据库(异步启动,不阻塞服务器)
+let dbInitialized = false;
+db.initDatabase().then(success => {
+  dbInitialized = success;
+  if (success) {
+    console.log('✅ 数据库持久化已启用');
+  } else {
+    console.log('⚠️  使用内存存储模式(数据会在重启后丢失)');
+  }
+}).catch(error => {
+  console.error('数据库初始化异常:', error);
+  dbInitialized = false;
+});
+
+// 对话历史存储 - 使用 Map 存储每个聊天的历史记录(作为后备方案)
 // key: chatId, value: 对话历史数组
 const conversationHistory = new Map();
 
@@ -54,39 +69,89 @@ const documentCache = new Map();
 // key: chatId, value: [{type, name, time, sender, messageId}]
 const fileCache = new Map();
 
-// 获取对话历史
-function getConversationHistory(chatId) {
+// 获取对话历史(优先使用数据库,回退到内存)
+async function getConversationHistory(chatId) {
+  if (dbInitialized) {
+    try {
+      const history = await db.getConversationHistory(chatId, 100);
+      console.log(`💬 [${chatId}] 从数据库读取对话历史: ${history.length} 条`);
+      return history;
+    } catch (error) {
+      console.error('从数据库读取对话历史失败,使用内存存储:', error.message);
+    }
+  }
+
+  // 回退到内存存储
   if (!conversationHistory.has(chatId)) {
     conversationHistory.set(chatId, []);
   }
   return conversationHistory.get(chatId);
 }
 
-// 添加消息到历史
-function addToConversationHistory(chatId, role, content) {
-  const history = getConversationHistory(chatId);
+// 添加消息到历史(同时保存到数据库和内存)
+async function addToConversationHistory(chatId, role, content) {
+  // 保存到数据库
+  if (dbInitialized) {
+    try {
+      await db.saveConversationMessage(chatId, role, content);
+      console.log(`💬 [${chatId}] 对话已保存到数据库`);
+    } catch (error) {
+      console.error('保存对话到数据库失败:', error.message);
+    }
+  }
+
+  // 同时保存到内存(作为缓存)
+  const history = conversationHistory.get(chatId) || [];
   history.push({ role, content });
 
   // 保留最近100轮对话（200条消息）
-  // Claude Opus 4.1 支持200K tokens上下文窗口，足够处理长对话
   const MAX_MESSAGES = 200;
   if (history.length > MAX_MESSAGES) {
     history.splice(0, history.length - MAX_MESSAGES);
   }
 
+  conversationHistory.set(chatId, history);
   console.log(`💬 [${chatId}] 对话历史长度: ${history.length} 条消息`);
 }
 
 // 清除对话历史（可选功能）
-function clearConversationHistory(chatId) {
+async function clearConversationHistory(chatId) {
+  // 清除数据库
+  if (dbInitialized) {
+    try {
+      await db.clearConversationHistory(chatId);
+      console.log(`🗑️ [${chatId}] 数据库对话历史已清除`);
+    } catch (error) {
+      console.error('清除数据库对话历史失败:', error.message);
+    }
+  }
+
+  // 清除内存
   conversationHistory.delete(chatId);
-  console.log(`🗑️ [${chatId}] 对话历史已清除`);
+  console.log(`🗑️ [${chatId}] 内存对话历史已清除`);
 }
 
 // ==================== 文档缓存管理 ====================
 
-// 添加文档到缓存
-function addDocumentToCache(chatId, docId, title, summary) {
+// 添加文档到缓存(同时保存到数据库和内存)
+async function addDocumentToCache(chatId, docId, title, summary) {
+  // 保存到数据库
+  if (dbInitialized) {
+    try {
+      // 使用文档URL作为唯一标识
+      const docUrl = `https://larksuite.com/docx/${docId}`;
+      await db.saveDocumentToCache(chatId, docUrl, {
+        title,
+        type: 'docx',
+        content: summary
+      });
+      console.log(`📄 [${chatId}] 文档已保存到数据库: ${title}`);
+    } catch (error) {
+      console.error('保存文档到数据库失败:', error.message);
+    }
+  }
+
+  // 同时保存到内存(作为缓存)
   if (!documentCache.has(chatId)) {
     documentCache.set(chatId, []);
   }
@@ -110,15 +175,43 @@ function addDocumentToCache(chatId, docId, title, summary) {
   console.log(`📄 [${chatId}] 文档已缓存: ${title}`);
 }
 
-// 获取最近的文档
-function getRecentDocuments(chatId) {
+// 获取最近的文档(优先使用数据库,回退到内存)
+async function getRecentDocuments(chatId) {
+  if (dbInitialized) {
+    try {
+      const docs = await db.getRecentDocuments(chatId, 20);
+      console.log(`📄 [${chatId}] 从数据库读取文档缓存: ${docs.length} 个`);
+      // 转换数据格式以兼容现有代码
+      return docs.map(doc => ({
+        docId: doc.url.split('/').pop(), // 从URL提取docId
+        title: doc.title,
+        summary: doc.title,
+        time: doc.lastAccess
+      }));
+    } catch (error) {
+      console.error('从数据库读取文档缓存失败,使用内存存储:', error.message);
+    }
+  }
+
+  // 回退到内存存储
   return documentCache.get(chatId) || [];
 }
 
 // ==================== 文件缓存管理 ====================
 
-// 添加文件到缓存
-function addFileToCache(chatId, fileInfo) {
+// 添加文件到缓存(同时保存到数据库和内存)
+async function addFileToCache(chatId, fileInfo) {
+  // 保存到数据库
+  if (dbInitialized) {
+    try {
+      await db.saveFileToCache(chatId, fileInfo);
+      console.log(`📁 [${chatId}] 文件已保存到数据库: ${fileInfo.name}`);
+    } catch (error) {
+      console.error('保存文件到数据库失败:', error.message);
+    }
+  }
+
+  // 同时保存到内存(作为缓存)
   if (!fileCache.has(chatId)) {
     fileCache.set(chatId, []);
   }
@@ -135,8 +228,19 @@ function addFileToCache(chatId, fileInfo) {
   console.log(`📁 [${chatId}] 文件已缓存: ${fileInfo.name} (类型: ${fileInfo.type})`);
 }
 
-// 获取缓存的文件列表
-function getCachedFiles(chatId) {
+// 获取缓存的文件列表(优先使用数据库,回退到内存)
+async function getCachedFiles(chatId) {
+  if (dbInitialized) {
+    try {
+      const files = await db.getCachedFiles(chatId, 100);
+      console.log(`📁 [${chatId}] 从数据库读取文件缓存: ${files.length} 个`);
+      return files;
+    } catch (error) {
+      console.error('从数据库读取文件缓存失败,使用内存存储:', error.message);
+    }
+  }
+
+  // 回退到内存存储
   return fileCache.get(chatId) || [];
 }
 
@@ -144,7 +248,7 @@ function getCachedFiles(chatId) {
 
 // 生成工作报告（日报/周报）
 async function generateWorkReport(chatId, reportType) {
-  const history = getConversationHistory(chatId);
+  const history = await getConversationHistory(chatId);
 
   if (history.length === 0) {
     return '📝 暂无对话历史，无法生成报告。\n\n💡 提示：请先与我进行一些工作相关的对话，我会基于对话内容为您生成报告。';
@@ -1116,12 +1220,12 @@ async function handleMessage(event) {
       }
 
       // 1. 添加到文件缓存
-      addFileToCache(chatId, fileInfo);
+      await addFileToCache(chatId, fileInfo);
       console.log(`✅ 文件已记录到缓存: ${fileInfo.name} [${fileInfo.type}]`);
 
       // 2. 添加到对话历史（让AI知道有文件被发送）
       const contextMessage = `[用户发送了${fileInfo.type}: ${fileInfo.name}]`;
-      addToConversationHistory(chatId, 'user', contextMessage);
+      await addToConversationHistory(chatId, 'user', contextMessage);
       console.log(`✅ 文件上下文已记录到对话历史`);
 
       return; // 文件消息静默处理完毕，不回复
@@ -1211,7 +1315,7 @@ async function handleMessage(event) {
       // ✅ 关键改进：群聊中即使没@，也记录到对话历史
       if (!shouldReply) {
         // 记录到对话历史（让机器人了解上下文）
-        addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'user', userMessage);
         console.log(`✅ 群聊消息已静默记录到对话历史（不回复）`);
         return; // 不回复
       }
@@ -1292,15 +1396,15 @@ async function handleMessage(event) {
         }
 
         // 记录到对话历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
 
       } catch (error) {
         console.error('多维表格分析失败:', error);
         reply = `抱歉，分析多维表格时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限访问该表格\n2. 表格链接正确\n3. 表格包含数据`;
         // 即使出错也记录到历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (docInfo.found) {
       console.log('🔍 检测到文档链接');
@@ -1325,18 +1429,18 @@ async function handleMessage(event) {
         // 将文档添加到缓存（用于"最近文档"查询）
         const docTitle = `文档 ${docInfo.documentId.substring(0, 8)}...`;
         const docSummary = reply.substring(0, 150);
-        addDocumentToCache(chatId, docInfo.documentId, docTitle, docSummary);
+        await addDocumentToCache(chatId, docInfo.documentId, docTitle, docSummary);
 
         // 记录到对话历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
 
       } catch (error) {
         console.error('文档分析失败:', error);
         reply = `抱歉，读取文档时出现错误: ${error.message}\n\n请确保：\n1. 机器人有权限访问该文档\n2. 文档链接正确\n3. 文档类型支持（docx/doc/docs）`;
         // 即使出错也记录到历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestMembers) {
       console.log('🔍 检测到群成员查询请求');
@@ -1355,15 +1459,15 @@ async function handleMessage(event) {
         reply = `👥 当前群组成员列表（共 ${members.length} 人）：\n\n${memberList}`;
 
         // 记录到对话历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
 
       } catch (error) {
         console.error('获取群成员失败:', error);
         reply = `抱歉，获取群成员信息时出现错误: ${error.message}\n\n请确保机器人有权限查看群成员列表。`;
         // 即使出错也记录到历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestCreateDoc) {
       console.log('🔍 检测到创建文档请求');
@@ -1446,15 +1550,15 @@ async function handleMessage(event) {
         }
 
         // 记录到对话历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
 
       } catch (error) {
         console.error('创建文档失败:', error);
         reply = `抱歉，创建文档时出现错误: ${error.message}\n\n请确保机器人有权限创建文档。`;
         // 即使出错也记录到历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestCreateTable) {
       console.log('🔍 检测到创建表格请求');
@@ -1480,15 +1584,15 @@ async function handleMessage(event) {
         reply = `✅ 多维表格创建成功并已自动填充数据！\n\n📊 表格名称: ${bitable.name}\n🔗 表格链接: ${bitable.url}\n📋 字段数量: ${bitable.fieldsCount}\n📝 数据记录: ${bitable.recordsCount} 条\n\n💡 提示：表格已包含示例数据，你可以直接查看或继续添加。`;
 
         // 记录到对话历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
 
       } catch (error) {
         console.error('创建表格失败:', error);
         reply = `抱歉，创建表格时出现错误: ${error.message}\n\n请确保机器人有权限创建多维表格。`;
         // 即使出错也记录到历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestReport) {
       // ==================== 新功能1: 生成日报/周报 ====================
@@ -1509,20 +1613,20 @@ async function handleMessage(event) {
         reply = await generateWorkReport(chatId, reportType);
 
         // 记录到对话历史
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
 
       } catch (error) {
         console.error('生成报告失败:', error);
         reply = `抱歉，生成报告时出现错误: ${error.message}`;
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
       }
     } else if (requestRecentDocs) {
       // ==================== 新功能2: 查询最近文档 ====================
       console.log('🔍 检测到最近文档查询请求');
 
-      const recentDocs = getRecentDocuments(chatId);
+      const recentDocs = await getRecentDocuments(chatId);
 
       if (recentDocs.length === 0) {
         reply = '📄 暂无最近讨论的文档记录。\n\n💡 提示：发送文档链接给我分析后，我会记录下来。';
@@ -1541,14 +1645,14 @@ async function handleMessage(event) {
       }
 
       // 记录到对话历史
-      addToConversationHistory(chatId, 'user', userMessage);
-      addToConversationHistory(chatId, 'assistant', reply);
+      await addToConversationHistory(chatId, 'user', userMessage);
+      await addToConversationHistory(chatId, 'assistant', reply);
     } else if (requestFileList) {
       // ==================== 新功能3: 汇总群文件（使用缓存） ====================
       console.log('📁 检测到群文件汇总请求');
 
       // 获取缓存的文件列表（无需API调用，即时返回）
-      const files = getCachedFiles(chatId);
+      const files = await getCachedFiles(chatId);
 
       if (files.length === 0) {
         reply = '📁 暂无文件记录。\n\n💡 提示：从现在开始，我会自动记录群里发送的所有文件（不需要@我）。发送文件后再试试"汇总文件"吧！';
@@ -1581,18 +1685,18 @@ async function handleMessage(event) {
       }
 
       // 记录到对话历史
-      addToConversationHistory(chatId, 'user', userMessage);
-      addToConversationHistory(chatId, 'assistant', reply);
+      await addToConversationHistory(chatId, 'user', userMessage);
+      await addToConversationHistory(chatId, 'assistant', reply);
     } else {
       // 检测是否请求清除对话历史
       const requestClearHistory = /清除对话|重置对话|清空历史|新对话/i.test(userMessage);
 
       if (requestClearHistory) {
-        clearConversationHistory(chatId);
+        await clearConversationHistory(chatId);
         reply = '✅ 对话历史已清除，我们可以开始新的对话了！';
       } else {
         // 普通对话 - 使用对话历史
-        const history = getConversationHistory(chatId);
+        const history = await getConversationHistory(chatId);
 
         // 如果有引用消息，将其添加到用户消息中作为上下文
         let finalUserMessage = userMessage;
@@ -1637,8 +1741,8 @@ ${quotedMessage}
         reply = claudeResponse.content[0].text;
 
         // 将对话添加到历史记录
-        addToConversationHistory(chatId, 'user', userMessage);
-        addToConversationHistory(chatId, 'assistant', reply);
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
       }
     }
 
