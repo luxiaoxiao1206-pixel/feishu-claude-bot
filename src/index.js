@@ -1289,18 +1289,23 @@ async function handleMessage(event) {
 
       // 方法1: 如果配置了机器人ID，精确匹配
       if (botId && mentions.length > 0) {
-        // 增强检测逻辑：支持多种匹配方式
+        // 精确检测：只匹配机器人的实际ID
         const isMentioned = mentions.some(mention => {
-          const idMatch =
-            mention.id?.user_id === botId ||
-            mention.id?.open_id === botId ||
-            mention.user_id === botId ||
-            mention.open_id === botId;
+          // 提取 mention 的 ID（支持多种格式）
+          const mentionId =
+            mention.id?.user_id ||
+            mention.id?.open_id ||
+            mention.user_id ||
+            mention.open_id;
 
-          const isBot = mention.key === '@_user_1' || mention.key?.includes('_user_');
-          const isAppId = botId.startsWith('cli_');
+          // 精确匹配机器人ID
+          const isMatch = mentionId === botId;
 
-          return idMatch || (isAppId && isBot);
+          if (isMatch) {
+            console.log(`✅ 检测到@机器人: mention.id = ${mentionId}, botId = ${botId}`);
+          }
+
+          return isMatch;
         });
 
         shouldReply = isMentioned;
