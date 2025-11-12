@@ -177,7 +177,11 @@ export async function getCachedFiles(chatId, limit = 100) {
       type: row.type,
       name: row.name,
       sender: row.sender,
-      time: new Date(row.time).toLocaleString('zh-CN')
+      time: new Date(row.time).toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      })
     }));
   } catch (error) {
     console.error('获取文件缓存失败:', error);
