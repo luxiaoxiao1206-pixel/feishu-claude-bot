@@ -1904,7 +1904,7 @@ ${userMessages}
 
           const claudeResponse = await anthropic.messages.create({
             model: 'claude-opus-4-1-20250805',
-            max_tokens: 16384, // 放开限制，支持超详细分析（约10,000字）
+            max_tokens: 8192, // 平衡详细度和响应速度（约5000字，避免超时）
             temperature: 0.3, // 降低温度，提高准确性和专注度
             messages: [{ role: 'user', content: summaryPrompt }],
           });
