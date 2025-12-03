@@ -141,6 +141,68 @@ export async function clearConversationHistory(chatId) {
   }
 }
 
+// 按时间范围查询对话历史
+export async function getConversationByTimeRange(chatId, startTime, endTime) {
+  if (!pool) return [];
+
+  try {
+    const result = await pool.query(
+      `SELECT role, content, timestamp, created_at
+       FROM conversation_history
+       WHERE chat_id = $1
+         AND timestamp >= $2
+         AND timestamp <= $3
+       ORDER BY timestamp ASC`,
+      [chatId, startTime, endTime]
+    );
+
+    return result.rows.map(row => ({
+      role: row.role,
+      content: row.content,
+      timestamp: row.timestamp,
+      time: new Date(row.timestamp).toLocaleString('zh-CN')
+    }));
+  } catch (error) {
+    console.error('按时间范围查询对话历史失败:', error);
+    return [];
+  }
+}
+
+// 获取对话历史的统计信息
+export async function getConversationStats(chatId, startTime, endTime) {
+  if (!pool) return null;
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         COUNT(*) as total_messages,
+         COUNT(CASE WHEN role = 'user' THEN 1 END) as user_messages,
+         COUNT(CASE WHEN role = 'assistant' THEN 1 END) as assistant_messages,
+         MIN(timestamp) as first_message_time,
+         MAX(timestamp) as last_message_time
+       FROM conversation_history
+       WHERE chat_id = $1
+         AND timestamp >= $2
+         AND timestamp <= $3`,
+      [chatId, startTime, endTime]
+    );
+
+    if (result.rows.length === 0) return null;
+
+    const stats = result.rows[0];
+    return {
+      totalMessages: parseInt(stats.total_messages),
+      userMessages: parseInt(stats.user_messages),
+      assistantMessages: parseInt(stats.assistant_messages),
+      firstMessageTime: stats.first_message_time ? parseInt(stats.first_message_time) : null,
+      lastMessageTime: stats.last_message_time ? parseInt(stats.last_message_time) : null
+    };
+  } catch (error) {
+    console.error('获取对话统计失败:', error);
+    return null;
+  }
+}
+
 // ==================== 文件缓存管理 ====================
 
 export async function saveFileToCache(chatId, fileInfo) {

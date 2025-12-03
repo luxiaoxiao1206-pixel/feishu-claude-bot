@@ -1081,6 +1081,110 @@ function getFileType(fileName) {
   return '其他文件';
 }
 
+// ==================== 时间解析工具函数 ====================
+
+// 智能解析时间范围（支持月度、周度、年度、自定义）
+function parseTimeRange(message) {
+  const now = new Date();
+  let startTime, endTime, period, year, month, week;
+
+  // 1. 年度总结：2025年、去年、今年
+  const yearMatch = message.match(/(\d{4})年|去年|今年/);
+  if (yearMatch) {
+    if (yearMatch[0] === '去年') {
+      year = now.getFullYear() - 1;
+    } else if (yearMatch[0] === '今年') {
+      year = now.getFullYear();
+    } else {
+      year = parseInt(yearMatch[1]);
+    }
+
+    startTime = new Date(year, 0, 1).getTime(); // 1月1日
+    endTime = new Date(year, 11, 31, 23, 59, 59, 999).getTime(); // 12月31日
+    period = `${year}年`;
+    return { startTime, endTime, period, type: 'year' };
+  }
+
+  // 2. 月度总结：11月、2025年11月、上个月、这个月
+  const monthMatch = message.match(/(\d{4})年(\d{1,2})月|(\d{1,2})月|上个?月|这个?月/);
+  if (monthMatch) {
+    if (monthMatch[0].includes('上')) {
+      // 上个月
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      year = lastMonth.getFullYear();
+      month = lastMonth.getMonth();
+    } else if (monthMatch[0].includes('这')) {
+      // 这个月
+      year = now.getFullYear();
+      month = now.getMonth();
+    } else if (monthMatch[1]) {
+      // 2025年11月
+      year = parseInt(monthMatch[1]);
+      month = parseInt(monthMatch[2]) - 1;
+    } else {
+      // 11月（假设当前年份）
+      year = now.getFullYear();
+      month = parseInt(monthMatch[3]) - 1;
+    }
+
+    startTime = new Date(year, month, 1).getTime(); // 月初
+    endTime = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime(); // 月末
+    period = `${year}年${month + 1}月`;
+    return { startTime, endTime, period, type: 'month' };
+  }
+
+  // 3. 周度总结：本周、上周、这周、第N周
+  const weekMatch = message.match(/本周|上周|这周|第(\d{1,2})周/);
+  if (weekMatch) {
+    let targetDate = new Date(now);
+
+    if (weekMatch[0].includes('上')) {
+      targetDate.setDate(targetDate.getDate() - 7);
+    }
+
+    // 获取当周的周一和周日
+    const day = targetDate.getDay();
+    const diff = targetDate.getDate() - day + (day === 0 ? -6 : 1); // 周一
+    const monday = new Date(targetDate.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(sunday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    startTime = monday.getTime();
+    endTime = sunday.getTime();
+    period = `${monday.getMonth() + 1}月${monday.getDate()}日-${sunday.getMonth() + 1}月${sunday.getDate()}日`;
+    return { startTime, endTime, period, type: 'week' };
+  }
+
+  // 4. 自定义日期范围：11月1日到11月15日、11月1号至15号
+  const rangeMatch = message.match(/(\d{1,2})月(\d{1,2})[日号](?:到|至|-)(\d{1,2})[日号]/);
+  if (rangeMatch) {
+    month = parseInt(rangeMatch[1]) - 1;
+    const startDay = parseInt(rangeMatch[2]);
+    const endDay = parseInt(rangeMatch[3]);
+    year = now.getFullYear();
+
+    startTime = new Date(year, month, startDay).getTime();
+    endTime = new Date(year, month, endDay, 23, 59, 59, 999).getTime();
+    period = `${month + 1}月${startDay}日-${endDay}日`;
+    return { startTime, endTime, period, type: 'custom' };
+  }
+
+  // 5. 最近N天：最近7天、最近30天
+  const daysMatch = message.match(/最近(\d{1,3})[天日]/);
+  if (daysMatch) {
+    const days = parseInt(daysMatch[1]);
+    endTime = now.getTime();
+    startTime = endTime - (days * 24 * 60 * 60 * 1000);
+    period = `最近${days}天`;
+    return { startTime, endTime, period, type: 'days' };
+  }
+
+  return null;
+}
+
 // 获取群聊历史消息中的文件列表
 async function getChatFiles(chatId, limit = 50) {
   try {
@@ -1369,6 +1473,9 @@ async function handleMessage(event) {
     const requestFileList = /汇总.*文件|分类.*文件|整理.*文件|群.*文件|发过.*文件|历史.*文件|文件列表|文件清单/i.test(userMessage);
     // 检测是否需要表格高级处理（筛选、统计、排序、对比）
     const requestTableAdvanced = bitableInfo.found && /筛选|过滤|统计|求和|平均|排序|对比|比较|查找.*满足|多少个|总数|最大|最小|前.*名/i.test(userMessage);
+    // 检测是否请求时间范围总结（月度、周度、年度、自定义）
+    const requestTimeSummary = /总结.*(月|周|年|天)|(\d{4})年.*总结|(\d{1,2})月.*总结|(最近\d+天).*总结|本周.*总结|上周.*总结/i.test(userMessage);
+    const timeRange = requestTimeSummary ? parseTimeRange(userMessage) : null;
 
     if (bitableInfo.found) {
       console.log('🔍 检测到多维表格链接');
@@ -1692,6 +1799,78 @@ async function handleMessage(event) {
       // 记录到对话历史
       await addToConversationHistory(chatId, 'user', userMessage);
       await addToConversationHistory(chatId, 'assistant', reply);
+    } else if (requestTimeSummary && timeRange) {
+      // ==================== 新功能4: 时间范围总结（月度/周度/年度/自定义） ====================
+      console.log(`📅 检测到时间范围总结请求: ${timeRange.period}`);
+
+      try {
+        // 发送"正在生成总结"提示
+        await feishuClient.im.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            msg_type: 'text',
+            content: JSON.stringify({ text: `📊 正在分析${timeRange.period}的对话记录，请稍候...` }),
+          },
+        });
+
+        // 从数据库查询指定时间范围的对话
+        const conversations = await db.getConversationByTimeRange(chatId, timeRange.startTime, timeRange.endTime);
+        const stats = await db.getConversationStats(chatId, timeRange.startTime, timeRange.endTime);
+
+        if (!conversations || conversations.length === 0) {
+          reply = `📅 ${timeRange.period}暂无对话记录。\n\n💡 提示：我只能总结机器人加入群组之后的对话内容。如果机器人是最近才加入的，可能没有${timeRange.period}的完整数据。`;
+        } else {
+          console.log(`📊 找到 ${conversations.length} 条对话记录，开始生成总结...`);
+
+          // 准备对话内容（只取用户消息，过滤掉机器人的回复，避免重复）
+          const userMessages = conversations
+            .filter(msg => msg.role === 'user')
+            .map(msg => `[${msg.time}] ${msg.content}`)
+            .join('\n\n');
+
+          // 使用 Claude AI 生成总结
+          const summaryPrompt = `请帮我总结以下${timeRange.period}的群聊记录（${stats.userMessages}条用户消息）：
+
+=== 群聊记录开始 ===
+${userMessages}
+=== 群聊记录结束 ===
+
+请提供一份结构化的总结报告，包括：
+1. 📊 **时间范围**: ${timeRange.period}
+2. 📈 **统计信息**: 总消息数、参与度等
+3. 💬 **主要话题**: 讨论的核心话题和内容
+4. 📌 **重要事项**: 关键决策、待办事项、重要通知等
+5. 👥 **活跃时段**: 什么时候讨论最活跃（如果能看出来）
+
+请用简洁专业的语言总结，突出重点。`;
+
+          const claudeResponse = await anthropic.messages.create({
+            model: 'claude-opus-4-1-20250805',
+            max_tokens: 4096,
+            messages: [{ role: 'user', content: summaryPrompt }],
+          });
+
+          const summaryText = claudeResponse.content[0].text;
+
+          // 组合最终回复
+          reply = `📅 ${timeRange.period} 对话总结\n\n` +
+                  `📊 数据范围: ${new Date(timeRange.startTime).toLocaleDateString('zh-CN')} - ${new Date(timeRange.endTime).toLocaleDateString('zh-CN')}\n` +
+                  `💬 总消息数: ${stats.totalMessages} 条（用户 ${stats.userMessages} 条）\n\n` +
+                  `${summaryText}\n\n` +
+                  `💡 提示：输入"总结上周"、"总结12月"、"总结2025年"可以查看其他时间段的总结。`;
+        }
+
+        // 记录到对话历史
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
+
+      } catch (error) {
+        console.error('生成时间范围总结失败:', error);
+        reply = `抱歉，生成${timeRange.period}总结时出现错误: ${error.message}`;
+        await addToConversationHistory(chatId, 'user', userMessage);
+        await addToConversationHistory(chatId, 'assistant', reply);
+      }
     } else {
       // 检测是否请求清除对话历史
       const requestClearHistory = /清除对话|重置对话|清空历史|新对话/i.test(userMessage);
