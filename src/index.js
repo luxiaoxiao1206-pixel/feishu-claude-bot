@@ -1408,15 +1408,19 @@ async function handleMessage(event) {
             mention.app_id;
 
           console.log(`🔍 检查mention: mentionId=${mentionId}, key=${mention.key}, name=${mention.name}`);
+          console.log(`🔍 完整mention对象:`, JSON.stringify(mention, null, 2));
 
-          // 精确匹配机器人ID（支持 app_id 和其他ID格式）
+          // 精确匹配机器人ID
           const isMatch = mentionId === botId;
 
-          // 如果没匹配到，尝试匹配 key（飞书机器人的key通常是 @_user_1）
-          const isBot = !isMatch && mention.key === '@_user_1' && botId.startsWith('cli_');
+          if (isMatch) {
+            console.log(`✅ 检测到@机器人: mentionId=${mentionId}, botId=${botId}`);
+            return true;
+          }
 
-          if (isMatch || isBot) {
-            console.log(`✅ 检测到@机器人: mentionId=${mentionId}, key=${mention.key}, botId=${botId}`);
+          // 如果ID没匹配上，检查 name 是否包含机器人的名字
+          if (mention.name && mention.name.includes('Claude')) {
+            console.log(`✅ 通过名字检测到@机器人: name=${mention.name}`);
             return true;
           }
 
