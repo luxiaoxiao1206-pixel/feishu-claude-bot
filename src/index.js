@@ -689,7 +689,8 @@ async function downloadFeishuImage(messageId, imageKey) {
   try {
     console.log(`📥 开始下载图片: messageId=${messageId}, imageKey=${imageKey}`);
 
-    const response = await feishuClient.im.message.resource({
+    // ✅ 修复：使用正确的 API 路径 messageResource.get (不是 message.resource)
+    const response = await feishuClient.im.messageResource.get({
       path: {
         message_id: messageId,
         file_key: imageKey
@@ -699,7 +700,8 @@ async function downloadFeishuImage(messageId, imageKey) {
       }
     });
 
-    if (!response.data) {
+    // 飞书 SDK 返回的 response 包含文件数据
+    if (!response || !response.data) {
       throw new Error('图片数据为空');
     }
 
