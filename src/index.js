@@ -73,7 +73,7 @@ const fileCache = new Map();
 async function getConversationHistory(chatId) {
   if (dbInitialized) {
     try {
-      const history = await db.getConversationHistory(chatId, 100);
+      const history = await db.getConversationHistory(chatId, 1000); // ✅ 扩大上下文窗口：100 → 1000
       console.log(`💬 [${chatId}] 从数据库读取对话历史: ${history.length} 条`);
       return history;
     } catch (error) {
@@ -104,8 +104,8 @@ async function addToConversationHistory(chatId, role, content) {
   const history = conversationHistory.get(chatId) || [];
   history.push({ role, content });
 
-  // 保留最近100轮对话（200条消息）
-  const MAX_MESSAGES = 200;
+  // 保留最近500轮对话（2000条消息）✅ 扩大内存缓存：200 → 2000
+  const MAX_MESSAGES = 2000;
   if (history.length > MAX_MESSAGES) {
     history.splice(0, history.length - MAX_MESSAGES);
   }
@@ -674,6 +674,100 @@ async function fetchDocContent(documentId) {
     console.error('获取文档内容失败:', error);
     console.error('错误详情:', error.response?.data || error.message);
     throw error;
+  }
+}
+
+// ==================== 图片下载与分析 ====================
+
+/**
+ * 下载飞书图片
+ * @param {string} messageId - 消息ID
+ * @param {string} imageKey - 图片Key
+ * @returns {Promise<Buffer>} 图片数据
+ */
+async function downloadFeishuImage(messageId, imageKey) {
+  try {
+    console.log(`📥 开始下载图片: messageId=${messageId}, imageKey=${imageKey}`);
+
+    const response = await feishuClient.im.message.resource({
+      path: {
+        message_id: messageId,
+        file_key: imageKey
+      },
+      params: {
+        type: 'image'
+      }
+    });
+
+    if (!response.data) {
+      throw new Error('图片数据为空');
+    }
+
+    console.log(`✅ 图片下载成功，大小: ${response.data.length} bytes`);
+    return response.data;
+  } catch (error) {
+    console.error('❌ 下载图片失败:', error);
+    console.error('错误详情:', error.response?.data || error.message);
+    throw new Error(`下载图片失败: ${error.message}`);
+  }
+}
+
+/**
+ * 使用 Claude Vision API 分析图片
+ * @param {Buffer} imageBuffer - 图片数据
+ * @param {string} userQuestion - 用户问题（可选）
+ * @returns {Promise<string>} 图片分析结果
+ */
+async function analyzeImageWithVision(imageBuffer, userQuestion = '') {
+  try {
+    console.log('🔍 开始使用 Vision API 分析图片');
+
+    // 将图片转换为 base64
+    const base64Image = imageBuffer.toString('base64');
+
+    // 判断图片类型（简单判断，可以根据实际需求扩展）
+    const imageType = 'image/jpeg'; // 飞书默认使用 JPEG 格式
+
+    // 构建提示词
+    const promptText = userQuestion
+      ? `请分析这张图片并回答问题：${userQuestion}`
+      : `请详细分析这张图片的内容，包括：
+1. 图片中的主要对象和场景
+2. 图片中的文字内容（如有）
+3. 图片的整体含义和上下文
+4. 其他值得注意的细节`;
+
+    // 调用 Claude Vision API
+    const claudeResponse = await anthropic.messages.create({
+      model: 'claude-opus-4-1-20250805',
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: imageType,
+              data: base64Image
+            }
+          },
+          {
+            type: 'text',
+            text: promptText
+          }
+        ]
+      }]
+    });
+
+    const analysisResult = claudeResponse.content[0].text;
+    console.log(`✅ 图片分析完成，长度: ${analysisResult.length} 字符`);
+
+    return analysisResult;
+  } catch (error) {
+    console.error('❌ Vision API 分析失败:', error);
+    console.error('错误详情:', error.response?.data || error.message);
+    throw new Error(`图片分析失败: ${error.message}`);
   }
 }
 
@@ -1314,25 +1408,75 @@ async function handleMessage(event) {
         const fileName = content.file_name || '未命名文件';
         fileInfo.type = getFileType(fileName);
         fileInfo.name = fileName;
+
+        // 添加到文件缓存
+        await addFileToCache(chatId, fileInfo);
+        console.log(`✅ 文件已记录到缓存: ${fileInfo.name} [${fileInfo.type}]`);
+
+        // 添加到对话历史
+        const contextMessage = `[用户发送了${fileInfo.type}: ${fileInfo.name}]`;
+        await addToConversationHistory(chatId, 'user', contextMessage);
+        console.log(`✅ 文件上下文已记录到对话历史`);
+
+        return; // 文件消息静默处理完毕，不回复
+
       } else if (msgType === 'image') {
+        // ==================== 图片智能分析 ====================
         fileInfo.type = '图片';
-        fileInfo.name = content.image_key ? `图片_${content.image_key.slice(0, 8)}` : '图片';
+        const imageKey = content.image_key;
+        fileInfo.name = imageKey ? `图片_${imageKey.slice(0, 8)}` : '图片';
+
+        try {
+          // 1. 下载图片
+          console.log('🖼️ 开始智能分析图片...');
+          const imageBuffer = await downloadFeishuImage(messageId, imageKey);
+
+          // 2. 使用 Vision API 分析图片
+          const imageAnalysis = await analyzeImageWithVision(imageBuffer);
+
+          // 3. 添加到文件缓存
+          await addFileToCache(chatId, fileInfo);
+          console.log(`✅ 图片已记录到缓存: ${fileInfo.name}`);
+
+          // 4. 将详细的图片分析结果保存到对话历史
+          const contextMessage = `[图片分析]\n图片名称: ${fileInfo.name}\n分析结果:\n${imageAnalysis}`;
+          await addToConversationHistory(chatId, 'assistant', contextMessage);
+          console.log(`✅ 图片分析已保存到对话历史，长度: ${imageAnalysis.length} 字符`);
+
+          // 5. 给用户发送分析结果
+          await replyMessage(messageId, `✅ 图片已分析完成！\n\n${imageAnalysis}\n\n💡 你可以继续向我提问关于这张图片的内容。`);
+          console.log('✅ 图片分析结果已发送给用户');
+
+          return; // 图片分析完成
+        } catch (error) {
+          console.error('❌ 图片分析失败:', error);
+
+          // 分析失败时的降级处理：仍然记录图片，但使用简单描述
+          await addFileToCache(chatId, fileInfo);
+          const fallbackMessage = `[用户发送了图片: ${fileInfo.name}（分析失败：${error.message}）]`;
+          await addToConversationHistory(chatId, 'user', fallbackMessage);
+
+          // 通知用户
+          await replyMessage(messageId, `⚠️ 图片接收成功，但分析时遇到问题：${error.message}\n\n你仍然可以向我提问，我会尽力理解。`);
+          return;
+        }
+
       } else if (msgType === 'media') {
         const fileName = content.file_name || '媒体文件';
         fileInfo.type = getFileType(fileName);
         fileInfo.name = fileName;
+
+        // 添加到文件缓存
+        await addFileToCache(chatId, fileInfo);
+        console.log(`✅ 文件已记录到缓存: ${fileInfo.name} [${fileInfo.type}]`);
+
+        // 添加到对话历史
+        const contextMessage = `[用户发送了${fileInfo.type}: ${fileInfo.name}]`;
+        await addToConversationHistory(chatId, 'user', contextMessage);
+        console.log(`✅ 文件上下文已记录到对话历史`);
+
+        return; // 文件消息静默处理完毕，不回复
       }
-
-      // 1. 添加到文件缓存
-      await addFileToCache(chatId, fileInfo);
-      console.log(`✅ 文件已记录到缓存: ${fileInfo.name} [${fileInfo.type}]`);
-
-      // 2. 添加到对话历史（让AI知道有文件被发送）
-      const contextMessage = `[用户发送了${fileInfo.type}: ${fileInfo.name}]`;
-      await addToConversationHistory(chatId, 'user', contextMessage);
-      console.log(`✅ 文件上下文已记录到对话历史`);
-
-      return; // 文件消息静默处理完毕，不回复
     }
 
     // ==================== 文本消息处理 ====================
