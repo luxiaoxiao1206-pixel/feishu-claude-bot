@@ -1419,6 +1419,11 @@ async function handleMessage(event) {
     // 解析消息内容
     const content = JSON.parse(messageEvent.message.content);
 
+    // 🔍 调试：打印消息内容结构（帮助诊断 post 类型消息）
+    if (msgType === 'post') {
+      console.log('📋 Post 消息内容结构:', JSON.stringify(content, null, 2));
+    }
+
     // ==================== 文件消息自动记录 ====================
     // 策略：文件消息记录到缓存和对话历史，但不回复（静默记录）
     if (msgType === 'file' || msgType === 'image' || msgType === 'media') {
