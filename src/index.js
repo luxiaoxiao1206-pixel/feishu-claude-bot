@@ -1697,6 +1697,78 @@ async function handleMessage(event) {
 
     let reply;
 
+    // ==================== 智能图片引用检测 ====================
+    // 检测用户是否在文本中提到图片（方式A：先发图片，后发文字提问）
+    const mentionsImage = /图片|这张|照片|截图|画面|图像|看图|解读.*图|分析.*图/i.test(userMessage);
+
+    if (mentionsImage) {
+      console.log('🖼️ 检测到用户提到图片，查找最近未分析的图片...');
+
+      // 从对话历史中查找最近的未分析图片
+      try {
+        const history = await getConversationHistory(chatId, 50); // 查找最近50条
+
+        // 查找最近的图片记录（格式：[用户发送了图片: 图片_xxx]）
+        let recentImageKey = null;
+        let recentImageMessageId = null;
+
+        for (let i = history.length - 1; i >= 0; i--) {
+          const msg = history[i];
+          // 查找未分析的图片（仅记录，没有分析结果）
+          if (msg.role === 'user' && msg.content.includes('[用户发送了图片:')) {
+            const match = msg.content.match(/图片_(img_[a-zA-Z0-9_]+)/);
+            if (match) {
+              recentImageKey = match[1];
+              console.log(`✅ 找到未分析的图片: ${recentImageKey}`);
+
+              // 查找对应的 messageId（从文件缓存中）
+              const files = conversationFiles.get(chatId) || [];
+              const imageFile = files.find(f => f.name.includes(recentImageKey));
+              if (imageFile) {
+                recentImageMessageId = imageFile.messageId;
+                console.log(`✅ 找到图片消息ID: ${recentImageMessageId}`);
+              }
+              break;
+            }
+          }
+          // 如果已经有分析结果，停止查找
+          if (msg.content.includes('[图片分析]')) {
+            console.log('📝 最近的图片已分析过，跳过');
+            break;
+          }
+        }
+
+        // 如果找到未分析的图片，立即分析
+        if (recentImageKey && recentImageMessageId) {
+          console.log(`🔍 开始分析用户提到的图片...`);
+
+          try {
+            // 下载并分析图片
+            const { buffer: imageBuffer, contentType } = await downloadFeishuImage(recentImageMessageId, recentImageKey);
+            const imageAnalysis = await analyzeImageWithVision(imageBuffer, contentType);
+
+            // 将分析结果保存到对话历史
+            const imageContext = `[图片分析]\n图片名称: 图片_${recentImageKey.slice(0, 8)}\n分析结果:\n${imageAnalysis}`;
+            await addToConversationHistory(chatId, 'assistant', imageContext);
+            console.log('✅ 图片分析完成并已保存到对话历史');
+
+            // 更新用户消息，添加图片分析上下文
+            userMessage = `[用户刚才发送了一张图片，图片分析结果如下]\n${imageAnalysis}\n\n[用户的问题]: ${userMessage}`;
+
+          } catch (error) {
+            console.error('❌ 智能图片分析失败:', error.message);
+            // 继续处理，但告知用户图片分析失败
+            userMessage = `[注意：用户提到了图片，但图片分析失败了。错误：${error.message}]\n\n[用户的问题]: ${userMessage}`;
+          }
+        } else {
+          console.log('📝 未找到最近的未分析图片');
+        }
+
+      } catch (error) {
+        console.error('❌ 查找图片历史失败:', error.message);
+      }
+    }
+
     // 检测是否包含多维表格链接
     const bitableInfo = extractBitableUrl(userMessage);
     // 检测是否包含文档链接
