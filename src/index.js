@@ -700,13 +700,36 @@ async function downloadFeishuImage(messageId, imageKey) {
       }
     });
 
-    // 飞书 SDK 返回的 response 包含文件数据
-    if (!response || !response.data) {
-      throw new Error('图片数据为空');
+    // 🔍 调试：打印 response 结构
+    console.log('🔍 Response 类型:', typeof response);
+    console.log('🔍 Response keys:', response ? Object.keys(response).join(', ') : 'null');
+
+    // 飞书 SDK 可能直接返回 Buffer，或在 response.data 中
+    let imageBuffer = null;
+
+    if (Buffer.isBuffer(response)) {
+      // SDK 直接返回 Buffer
+      imageBuffer = response;
+      console.log(`✅ 图片下载成功（直接Buffer），大小: ${imageBuffer.length} bytes`);
+    } else if (response && response.data) {
+      // SDK 返回对象，数据在 data 字段
+      imageBuffer = response.data;
+      console.log(`✅ 图片下载成功（response.data），大小: ${imageBuffer.length} bytes`);
+    } else if (response && response.file) {
+      // SDK 返回对象，数据在 file 字段
+      imageBuffer = response.file;
+      console.log(`✅ 图片下载成功（response.file），大小: ${imageBuffer.length} bytes`);
+    } else {
+      // 无法获取图片数据
+      console.error('❌ Response 结构异常:', JSON.stringify(response, null, 2));
+      throw new Error('图片数据为空 - 请检查飞书 SDK 返回结构');
     }
 
-    console.log(`✅ 图片下载成功，大小: ${response.data.length} bytes`);
-    return response.data;
+    if (!Buffer.isBuffer(imageBuffer)) {
+      throw new Error(`返回的数据不是 Buffer 类型: ${typeof imageBuffer}`);
+    }
+
+    return imageBuffer;
   } catch (error) {
     console.error('❌ 下载图片失败:', error);
     console.error('错误详情:', error.response?.data || error.message);
@@ -1446,7 +1469,16 @@ async function handleMessage(event) {
           console.log(`✅ 图片分析已保存到对话历史，长度: ${imageAnalysis.length} 字符`);
 
           // 5. 给用户发送分析结果
-          await replyMessage(messageId, `✅ 图片已分析完成！\n\n${imageAnalysis}\n\n💡 你可以继续向我提问关于这张图片的内容。`);
+          await feishuClient.im.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              msg_type: 'text',
+              content: JSON.stringify({
+                text: `✅ 图片已分析完成！\n\n${imageAnalysis}\n\n💡 你可以继续向我提问关于这张图片的内容。`
+              })
+            }
+          });
           console.log('✅ 图片分析结果已发送给用户');
 
           return; // 图片分析完成
@@ -1459,7 +1491,16 @@ async function handleMessage(event) {
           await addToConversationHistory(chatId, 'user', fallbackMessage);
 
           // 通知用户
-          await replyMessage(messageId, `⚠️ 图片接收成功，但分析时遇到问题：${error.message}\n\n你仍然可以向我提问，我会尽力理解。`);
+          await feishuClient.im.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              msg_type: 'text',
+              content: JSON.stringify({
+                text: `⚠️ 图片接收成功，但分析时遇到问题：${error.message}\n\n你仍然可以向我提问，我会尽力理解。`
+              })
+            }
+          });
           return;
         }
 
