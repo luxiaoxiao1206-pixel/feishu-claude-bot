@@ -1730,11 +1730,13 @@ async function handleMessage(event) {
               console.log(`✅ 找到未分析的图片: ${recentImageKey}`);
 
               // 查找对应的 messageId（从文件缓存中）
-              const files = conversationFiles.get(chatId) || [];
-              const imageFile = files.find(f => f.name.includes(recentImageKey));
-              if (imageFile) {
+              const files = await getCachedFiles(chatId);
+              const imageFile = files.find(f => f.name && f.name.includes(recentImageKey));
+              if (imageFile && imageFile.messageId) {
                 recentImageMessageId = imageFile.messageId;
                 console.log(`✅ 找到图片消息ID: ${recentImageMessageId}`);
+              } else {
+                console.log(`⚠️ 未找到图片的messageId，缓存中的文件:`, files.map(f => f.name).join(', '));
               }
               break;
             }
