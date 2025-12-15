@@ -1457,49 +1457,37 @@ async function handleMessage(event) {
         const imageKey = content.image_key;
         fileInfo.name = imageKey ? `图片_${imageKey.slice(0, 8)}` : '图片';
 
-        // ✅ 检查是否需要智能分析（群聊需要@，私聊直接分析）
-        let shouldAnalyze = false;
+        // ✅ 新策略：群聊和私聊都自动分析图片，但只有@了才回复
+        let shouldReply = false; // 是否需要回复用户
 
         if (chatType === 'p2p') {
-          // 私聊：始终分析
-          shouldAnalyze = true;
-          console.log('📱 私聊图片，将进行智能分析');
+          // 私聊：分析并回复
+          shouldReply = true;
+          console.log('📱 私聊图片，将分析并回复');
         } else if (chatType === 'group') {
-          // 群聊：检查是否@了机器人
+          // 群聊：始终分析，但只有@了才回复
           const botId = process.env.FEISHU_BOT_ID;
           if (botId && mentions.length > 0) {
             const isMentioned = mentions.some(mention => {
               const mentionId = mention.id?.user_id || mention.id?.open_id || mention.id?.union_id || mention.key;
               return mentionId === botId || (mention.name && mention.name.includes('Claude'));
             });
-            shouldAnalyze = isMentioned;
-            console.log(isMentioned ? '✅ 群聊图片被@，将进行智能分析' : '📝 群聊图片未@，仅记录不分析');
+            shouldReply = isMentioned;
+            console.log(isMentioned ? '✅ 群聊图片被@，将分析并回复' : '📝 群聊图片，将分析但保持静默');
           } else {
-            // 兼容模式：如果有任何@就分析
-            shouldAnalyze = mentions.length > 0;
-            console.log(shouldAnalyze ? '✅ 检测到@，将分析（兼容模式）' : '📝 未@，仅记录');
+            // 兼容模式：检查是否有@
+            shouldReply = mentions.length > 0;
+            console.log(shouldReply ? '✅ 检测到@，将分析并回复' : '📝 群聊图片，将分析但保持静默');
           }
         }
 
-        // 情况1：不需要分析 - 仅记录
-        if (!shouldAnalyze) {
-          await addFileToCache(chatId, fileInfo);
-          console.log(`✅ 图片已记录到缓存: ${fileInfo.name}（静默模式）`);
-
-          const contextMessage = `[用户发送了图片: ${fileInfo.name}]`;
-          await addToConversationHistory(chatId, 'user', contextMessage);
-          console.log(`✅ 图片上下文已记录到对话历史`);
-
-          return; // 静默处理完毕
-        }
-
-        // 情况2：需要分析 - 完整的智能分析流程
+        // 下载并分析图片（群聊和私聊都分析）
         try {
           // 1. 下载图片
           console.log('🖼️ 开始智能分析图片...');
           const { buffer: imageBuffer, contentType } = await downloadFeishuImage(messageId, imageKey);
 
-          // 2. 使用 Vision API 分析图片（使用实际的图片类型）
+          // 2. 使用 Vision API 分析图片
           const imageAnalysis = await analyzeImageWithVision(imageBuffer, contentType);
 
           // 3. 添加到文件缓存
@@ -1511,18 +1499,22 @@ async function handleMessage(event) {
           await addToConversationHistory(chatId, 'assistant', contextMessage);
           console.log(`✅ 图片分析已保存到对话历史，长度: ${imageAnalysis.length} 字符`);
 
-          // 5. 给用户发送分析结果
-          await feishuClient.im.message.create({
-            params: { receive_id_type: 'chat_id' },
-            data: {
-              receive_id: chatId,
-              msg_type: 'text',
-              content: JSON.stringify({
-                text: `✅ 图片已分析完成！\n\n${imageAnalysis}\n\n💡 你可以继续向我提问关于这张图片的内容。`
-              })
-            }
-          });
-          console.log('✅ 图片分析结果已发送给用户');
+          // 5. 只有需要回复时才发送消息
+          if (shouldReply) {
+            await feishuClient.im.message.create({
+              params: { receive_id_type: 'chat_id' },
+              data: {
+                receive_id: chatId,
+                msg_type: 'text',
+                content: JSON.stringify({
+                  text: `✅ 图片已分析完成！\n\n${imageAnalysis}\n\n💡 你可以继续向我提问关于这张图片的内容。`
+                })
+              }
+            });
+            console.log('✅ 图片分析结果已发送给用户');
+          } else {
+            console.log('✅ 图片已分析完成，保持静默（群聊未@机器人）');
+          }
 
           return; // 图片分析完成
         } catch (error) {
@@ -1533,17 +1525,21 @@ async function handleMessage(event) {
           const fallbackMessage = `[用户发送了图片: ${fileInfo.name}（分析失败：${error.message}）]`;
           await addToConversationHistory(chatId, 'user', fallbackMessage);
 
-          // 通知用户（只在被@时通知）
-          await feishuClient.im.message.create({
-            params: { receive_id_type: 'chat_id' },
-            data: {
-              receive_id: chatId,
-              msg_type: 'text',
-              content: JSON.stringify({
-                text: `⚠️ 图片接收成功，但分析时遇到问题：${error.message}\n\n你仍然可以向我提问，我会尽力理解。`
-              })
-            }
-          });
+          // 只有在需要回复时才通知用户
+          if (shouldReply) {
+            await feishuClient.im.message.create({
+              params: { receive_id_type: 'chat_id' },
+              data: {
+                receive_id: chatId,
+                msg_type: 'text',
+                content: JSON.stringify({
+                  text: `⚠️ 图片接收成功，但分析时遇到问题：${error.message}\n\n你仍然可以向我提问，我会尽力理解。`
+                })
+              }
+            });
+          } else {
+            console.log('⚠️ 图片分析失败，但保持静默（群聊未@机器人）');
+          }
           return;
         }
 
