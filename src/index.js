@@ -683,7 +683,7 @@ async function fetchDocContent(documentId) {
  * 下载飞书图片
  * @param {string} messageId - 消息ID
  * @param {string} imageKey - 图片Key
- * @returns {Promise<Buffer>} 图片数据
+ * @returns {Promise<{buffer: Buffer, contentType: string}>} 图片数据和类型
  */
 async function downloadFeishuImage(messageId, imageKey) {
   try {
@@ -721,15 +721,17 @@ async function downloadFeishuImage(messageId, imageKey) {
     }
     const imageBuffer = Buffer.concat(chunks);
 
+    // 获取实际的图片类型
+    const contentType = response.headers?.['content-type'] || 'image/jpeg';
+
     console.log(`✅ 图片下载成功！大小: ${imageBuffer.length} bytes`);
+    console.log(`📋 Content-Type: ${contentType}`);
+    console.log(`📋 Content-Length: ${response.headers?.['content-length'] || imageBuffer.length}`);
 
-    // 打印 content-type 和 content-length（如果有）
-    if (response.headers) {
-      console.log(`📋 Content-Type: ${response.headers['content-type']}`);
-      console.log(`📋 Content-Length: ${response.headers['content-length']}`);
-    }
-
-    return imageBuffer;
+    return {
+      buffer: imageBuffer,
+      contentType: contentType
+    };
   } catch (error) {
     console.error('❌ 下载图片失败:', error);
     console.error('错误详情:', error.response?.data || error.message);
@@ -740,18 +742,17 @@ async function downloadFeishuImage(messageId, imageKey) {
 /**
  * 使用 Claude Vision API 分析图片
  * @param {Buffer} imageBuffer - 图片数据
+ * @param {string} imageType - 图片MIME类型 (如 image/png, image/jpeg)
  * @param {string} userQuestion - 用户问题（可选）
  * @returns {Promise<string>} 图片分析结果
  */
-async function analyzeImageWithVision(imageBuffer, userQuestion = '') {
+async function analyzeImageWithVision(imageBuffer, imageType = 'image/jpeg', userQuestion = '') {
   try {
     console.log('🔍 开始使用 Vision API 分析图片');
+    console.log(`📋 图片类型: ${imageType}`);
 
     // 将图片转换为 base64
     const base64Image = imageBuffer.toString('base64');
-
-    // 判断图片类型（简单判断，可以根据实际需求扩展）
-    const imageType = 'image/jpeg'; // 飞书默认使用 JPEG 格式
 
     // 构建提示词
     const promptText = userQuestion
@@ -1491,10 +1492,10 @@ async function handleMessage(event) {
         try {
           // 1. 下载图片
           console.log('🖼️ 开始智能分析图片...');
-          const imageBuffer = await downloadFeishuImage(messageId, imageKey);
+          const { buffer: imageBuffer, contentType } = await downloadFeishuImage(messageId, imageKey);
 
-          // 2. 使用 Vision API 分析图片
-          const imageAnalysis = await analyzeImageWithVision(imageBuffer);
+          // 2. 使用 Vision API 分析图片（使用实际的图片类型）
+          const imageAnalysis = await analyzeImageWithVision(imageBuffer, contentType);
 
           // 3. 添加到文件缓存
           await addFileToCache(chatId, fileInfo);
