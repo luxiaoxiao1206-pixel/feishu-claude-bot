@@ -700,33 +700,33 @@ async function downloadFeishuImage(messageId, imageKey) {
       }
     });
 
-    // 🔍 调试：打印 response 结构
+    // ✅ 飞书 SDK 返回的是一个对象，包含 getReadableStream() 方法
     console.log('🔍 Response 类型:', typeof response);
     console.log('🔍 Response keys:', response ? Object.keys(response).join(', ') : 'null');
 
-    // 飞书 SDK 可能直接返回 Buffer，或在 response.data 中
-    let imageBuffer = null;
-
-    if (Buffer.isBuffer(response)) {
-      // SDK 直接返回 Buffer
-      imageBuffer = response;
-      console.log(`✅ 图片下载成功（直接Buffer），大小: ${imageBuffer.length} bytes`);
-    } else if (response && response.data) {
-      // SDK 返回对象，数据在 data 字段
-      imageBuffer = response.data;
-      console.log(`✅ 图片下载成功（response.data），大小: ${imageBuffer.length} bytes`);
-    } else if (response && response.file) {
-      // SDK 返回对象，数据在 file 字段
-      imageBuffer = response.file;
-      console.log(`✅ 图片下载成功（response.file），大小: ${imageBuffer.length} bytes`);
-    } else {
-      // 无法获取图片数据
-      console.error('❌ Response 结构异常:', JSON.stringify(response, null, 2));
-      throw new Error('图片数据为空 - 请检查飞书 SDK 返回结构');
+    // 检查响应对象是否有 getReadableStream 方法
+    if (!response || typeof response.getReadableStream !== 'function') {
+      console.error('❌ Response 结构异常 - 缺少 getReadableStream 方法');
+      throw new Error('SDK 响应格式错误：缺少 getReadableStream 方法');
     }
 
-    if (!Buffer.isBuffer(imageBuffer)) {
-      throw new Error(`返回的数据不是 Buffer 类型: ${typeof imageBuffer}`);
+    // 使用 getReadableStream() 获取图片数据流
+    console.log('📡 正在从流中读取图片数据...');
+    const stream = response.getReadableStream();
+
+    // 将流转换为 Buffer
+    const chunks = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+    const imageBuffer = Buffer.concat(chunks);
+
+    console.log(`✅ 图片下载成功！大小: ${imageBuffer.length} bytes`);
+
+    // 打印 content-type 和 content-length（如果有）
+    if (response.headers) {
+      console.log(`📋 Content-Type: ${response.headers['content-type']}`);
+      console.log(`📋 Content-Length: ${response.headers['content-length']}`);
     }
 
     return imageBuffer;
