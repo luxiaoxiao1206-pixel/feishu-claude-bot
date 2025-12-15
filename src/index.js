@@ -1451,6 +1451,43 @@ async function handleMessage(event) {
         const imageKey = content.image_key;
         fileInfo.name = imageKey ? `图片_${imageKey.slice(0, 8)}` : '图片';
 
+        // ✅ 检查是否需要智能分析（群聊需要@，私聊直接分析）
+        let shouldAnalyze = false;
+
+        if (chatType === 'p2p') {
+          // 私聊：始终分析
+          shouldAnalyze = true;
+          console.log('📱 私聊图片，将进行智能分析');
+        } else if (chatType === 'group') {
+          // 群聊：检查是否@了机器人
+          const botId = process.env.FEISHU_BOT_ID;
+          if (botId && mentions.length > 0) {
+            const isMentioned = mentions.some(mention => {
+              const mentionId = mention.id?.user_id || mention.id?.open_id || mention.id?.union_id || mention.key;
+              return mentionId === botId || (mention.name && mention.name.includes('Claude'));
+            });
+            shouldAnalyze = isMentioned;
+            console.log(isMentioned ? '✅ 群聊图片被@，将进行智能分析' : '📝 群聊图片未@，仅记录不分析');
+          } else {
+            // 兼容模式：如果有任何@就分析
+            shouldAnalyze = mentions.length > 0;
+            console.log(shouldAnalyze ? '✅ 检测到@，将分析（兼容模式）' : '📝 未@，仅记录');
+          }
+        }
+
+        // 情况1：不需要分析 - 仅记录
+        if (!shouldAnalyze) {
+          await addFileToCache(chatId, fileInfo);
+          console.log(`✅ 图片已记录到缓存: ${fileInfo.name}（静默模式）`);
+
+          const contextMessage = `[用户发送了图片: ${fileInfo.name}]`;
+          await addToConversationHistory(chatId, 'user', contextMessage);
+          console.log(`✅ 图片上下文已记录到对话历史`);
+
+          return; // 静默处理完毕
+        }
+
+        // 情况2：需要分析 - 完整的智能分析流程
         try {
           // 1. 下载图片
           console.log('🖼️ 开始智能分析图片...');
@@ -1490,7 +1527,7 @@ async function handleMessage(event) {
           const fallbackMessage = `[用户发送了图片: ${fileInfo.name}（分析失败：${error.message}）]`;
           await addToConversationHistory(chatId, 'user', fallbackMessage);
 
-          // 通知用户
+          // 通知用户（只在被@时通知）
           await feishuClient.im.message.create({
             params: { receive_id_type: 'chat_id' },
             data: {
